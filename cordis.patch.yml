@@ -1,0 +1,7 @@
+# dsh-wf bundle patch — 作为 profile bundle 层应用
+# name 即 loader 的模块说明符（同时决定插件管理器显示名，显示时去掉 dsh- 前缀）。
+# 依赖键必须保持合法 npm 名 "dsh-wf"（pnpm 拒绝中文依赖键）；
+# 中文说明符 "dsh界面草图" 通过 ~/.dsh/profiles/node_modules/ 下的目录联接解析到本包。
+- insert:
+    - id: dsh-wf
+      name: dsh界面草图
