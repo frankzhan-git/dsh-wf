@@ -56,21 +56,38 @@ export function zoomAt(factor, zoom, pan) {
 // 返回动作清单：
 //  { kind: 'pan', drag } | { kind: 'select', ids } | { kind: 'toggle', ids }
 //  | { kind: 'move'|'resize', drag } | { kind: 'marquee', drag } | { kind: 'groupResize', drag }
-//  | { kind: 'create', element, drag } | { kind: 'limit' }（数量上限，由调用方 toast）
+//  | { kind: 'groupEdgeResize', drag } | { kind: 'create', element, drag } | { kind: 'limit' }（数量上限，由调用方 toast）
+
+// 边手柄命中（四边横向/纵向 resize）：边缘带 6/zoom（逻辑像素），排除右下角手柄区域（角优先）
+export function hitEdgeOf(el, x, y, zoom) {
+  const th = 6 / zoom
+  const onRight = Math.abs(x - (el.x + el.w)) <= th && y > el.y && y < el.y + el.h
+  const onLeft = Math.abs(x - el.x) <= th && y > el.y && y < el.y + el.h
+  const onBottom = Math.abs(y - (el.y + el.h)) <= th && x > el.x && x < el.x + el.w
+  const onTop = Math.abs(y - el.y) <= th && x > el.x && x < el.x + el.w
+  if (onRight) return 'r'
+  if (onLeft) return 'l'
+  if (onBottom) return 'b'
+  if (onTop) return 't'
+  return null
+}
+
 export function decidePointerDown(ctx, x, y, clientX, clientY) {
   // 空格按住 = 平移画布（屏幕像素直算，不经坐标换算）
   if (ctx.spaceDown) {
     return { kind: 'pan', drag: { mode: 'pan', sx: clientX, sy: clientY, px: ctx.pan.x, py: ctx.pan.y } }
   }
   const { elements, mode, zoom, selectedIds } = ctx
-  // 命中已有控件：选中 + 移动 / 右下角改大小
+  // 命中已有控件：选中 + 移动 / 边或右下角改大小
   const hit = hitTest(elements, x, y)
   // 控件模式下「容器类」命中（页面/容器/未显式类型矩形）视为空白：可在其内部继续绘制控件
   const hitContainerLike = !!(hit && mode === 'draw'
     && (hit.type === 'page' || hit.type === 'container' || !hit.type))
   const hitNonContainerInDraw = !!(hit && mode === 'draw' && !hitContainerLike)
   if (hit && !hitContainerLike) {
-    const onHandle = hit.kind !== 'arrow' && x > hit.x + hit.w - 14 / zoom && y > hit.y + hit.h - 14 / zoom
+    const onCorner = hit.kind !== 'arrow' && x > hit.x + hit.w - 14 / zoom && y > hit.y + hit.h - 14 / zoom
+    const edge = hit.kind !== 'arrow' ? hitEdgeOf(hit, x, y, zoom) : null
+    const onHandle = hit.kind !== 'arrow' && (onCorner || edge !== null)
     if (mode === 'draw' && !onHandle) {
       if (hitNonContainerInDraw) {
         // 控件模式命中显式非容器：仅选中（不允许在其内绘制）
@@ -98,6 +115,7 @@ export function decidePointerDown(ctx, x, y, clientX, clientY) {
         id: hit.id, sx: x, sy: y,
         ox: hit.x, oy: hit.y,
         ow: hit.w, oh: hit.h,
+        side: onCorner ? 'br' : (edge || 'br'), // 边/角语义：br=右下角（原行为），l/r/t/b=四边
         prev: null, // 由调用方填充（elements 深拷贝）
         page: pageSnap,
       }
@@ -106,7 +124,7 @@ export function decidePointerDown(ctx, x, y, clientX, clientY) {
   }
   // 未命中（或控件模式命中容器/页面 = 空白）
   if (mode === 'select') {
-    // 多选外框角手柄命中 → 等比批量缩放
+    // 多选外框手柄命中 → 批量缩放：四角等比（原行为）+ 四边横向/纵向（幅度与移动量一致）
     if (selectedIds.length > 1) {
       const gb = groupBounds(elements, selectedIds)
       const handle = 10 / zoom
@@ -119,6 +137,17 @@ export function decidePointerDown(ctx, x, y, clientX, clientY) {
       const hitCorner = corners.find((c) => x >= c.x - handle && x <= c.x + handle && y >= c.y - handle && y <= c.y + handle)
       if (hitCorner) {
         return { kind: 'groupResize', drag: { mode: 'groupResize', corner: hitCorner.k, sx: x, sy: y, gb } }
+      }
+      // 四边（排除角带）：上下左右均可横向/纵向批量调整
+      const inX = x >= gb.x + handle && x <= gb.x + gb.w - handle
+      const inY = y >= gb.y + handle && y <= gb.y + gb.h - handle
+      let side = null
+      if (inX && y >= gb.y - handle && y <= gb.y + handle) side = 't'
+      else if (inX && y >= gb.y + gb.h - handle && y <= gb.y + gb.h + handle) side = 'b'
+      else if (inY && x >= gb.x - handle && x <= gb.x + handle) side = 'l'
+      else if (inY && x >= gb.x + gb.w - handle && x <= gb.x + gb.w + handle) side = 'r'
+      if (side) {
+        return { kind: 'groupEdgeResize', drag: { mode: 'groupEdgeResize', side, sx: x, sy: y, gb } }
       }
     }
     // 空白处按下 → 开始框选（marquee），单击空白 = 取消多选
@@ -147,6 +176,7 @@ export function updateDrag(ctx, drag, x, y, clientX, clientY) {
   if (drag.mode === 'move') return computeMove(ctx, drag, x, y)
   if (drag.mode === 'marquee') return { nextDrag: Object.assign({}, drag, { mq: computeMarquee(drag, x, y) }) }
   if (drag.mode === 'groupResize') return { patches: computeGroupResize(ctx, drag, x, y) }
+  if (drag.mode === 'groupEdgeResize') return { patches: computeGroupEdgeResize(ctx, drag, x, y) }
   if (drag.mode === 'resize') {
     // resize 附带对齐吸附：patch 与吸附虚线分开返回（与 move 一致）
     const r = computeResize(ctx, drag, x, y)
@@ -327,43 +357,121 @@ export function computeGroupResize(ctx, drag, x, y) {
   return patches
 }
 
-// 改尺寸（右下角手柄）：按类型最小尺寸 + 下边/右边对齐吸附（阈值与移动一致 6/zoom）+ 页面边界钳制
-// 吸附目标：其它控件边缘 + 所属页面边界；仅吸附正在移动的右/下边缘（左/上为锚点不动）
+// 多选外框边批量调整（横向/纵向）：移动边一侧的控件边缘跟随移动量，对侧不动（线性，非等比）
+//  - r：右边移动 dx → 每个控件 w += dx（左边缘不动）
+//  - l：左边移动 dx → 每个控件 x += dx 且 w -= dx（右边缘不动）
+//  - b：下边移动 dy → 每个控件 h += dy
+//  - t：上边移动 dy → 每个控件 y += dy 且 h -= dy
+// 钳制：每控件按类型最小尺寸（钳制时该控件幅度不足满量，属必要保护）
+export function computeGroupEdgeResize(ctx, drag, x, y) {
+  const side = drag.side
+  const dx = side === 'l' || side === 'r' ? x - drag.sx : 0
+  const dy = side === 't' || side === 'b' ? y - drag.sy : 0
+  const idSet = new Set(ctx.selectedIds)
+  const patches = []
+  for (const e of ctx.elements) {
+    if (!idSet.has(e.id)) continue
+    const min = minSizeOf(ctx.elements, e)
+    const p = { id: e.id }
+    if (side === 'r') p.w = Math.max(min.w, e.w + dx)
+    else if (side === 'l') {
+      const nw = Math.max(min.w, e.w - dx)
+      p.x = e.x + (e.w - nw) // 右边缘不动：x 按缩量前移
+      p.w = nw
+    } else if (side === 'b') p.h = Math.max(min.h, e.h + dy)
+    else if (side === 't') {
+      const nh = Math.max(min.h, e.h - dy)
+      p.y = e.y + (e.h - nh) // 下边缘不动
+      p.h = nh
+    }
+    patches.push(p)
+  }
+  return patches
+}
+
+// 改尺寸（右下角手柄或四边）：按类型最小尺寸 + 移动边对齐吸附（阈值 6/zoom 与移动一致）+ 页面边界钳制
+// 吸附目标：其它控件边缘 + 所属页面边界；仅吸附正在移动的边缘（对侧为锚点不动）
+//  - br（原行为）：右/下边移动，锚定左上
+//  - r/l：横向（右边缘/左边缘移动）；b/t：纵向（下边缘/上边缘移动）
 export function computeResize(ctx, drag, x, y) {
   const el = ctx.elements.find((e) => e.id === drag.id)
   if (!el) return null
   const { zoom, elements } = ctx
   const min = minSizeOf(elements, el)
-  let w = Math.max(min.w, drag.ow + x - drag.sx)
-  let h = Math.max(min.h, drag.oh + y - drag.sy)
+  const side = drag.side || 'br'
+  const dx = x - drag.sx
+  const dy = y - drag.sy
+  // 锚点（缺省回退到元素当前坐标：旧调用方 drag 无 ox/oy 时行为不变）
+  const ox = drag.ox !== undefined ? drag.ox : el.x
+  const oy = drag.oy !== undefined ? drag.oy : el.y
+  let nx = ox
+  let ny = oy
+  let w = drag.ow
+  let h = drag.oh
+  // 尺寸计算（按移动边；对侧锚定）
+  if (side === 'r' || side === 'br') w = Math.max(min.w, drag.ow + dx)
+  if (side === 'b' || side === 'br') h = Math.max(min.h, drag.oh + dy)
+  if (side === 'l') { w = Math.max(min.w, drag.ow - dx); nx = ox + drag.ow - w }
+  if (side === 't') { h = Math.max(min.h, drag.oh - dy); ny = oy + drag.oh - h }
   const tol = 6 / zoom
   const snaps = []
   const targets = elements.filter((t) => t.id !== el.id && t.kind !== 'arrow')
   if (drag.page) targets.push(drag.page)
-  // 右边（右边缘 = el.x + w）→ 吸附到目标左/右边缘
-  const rightX = el.x + w
-  let bw = null
-  for (const t of targets) {
-    for (const [d, pos] of [[Math.abs(rightX - t.x), t.x], [Math.abs(rightX - (t.x + t.w)), t.x + t.w]]) {
-      if (d < tol && (!bw || d < bw.d)) bw = { d, pos }
+  // 移动边吸附（r/b/br：右边/下边；l/t：左边/上边）
+  if (side === 'r' || side === 'br') {
+    const rightX = nx + w
+    let bw = null
+    for (const t of targets) {
+      for (const [d, pos] of [[Math.abs(rightX - t.x), t.x], [Math.abs(rightX - (t.x + t.w)), t.x + t.w]]) {
+        if (d < tol && (!bw || d < bw.d)) bw = { d, pos }
+      }
     }
+    if (bw) { w = Math.max(min.w, bw.pos - nx); snaps.push({ axis: 'v', pos: bw.pos }) }
   }
-  if (bw) { w = Math.max(min.w, bw.pos - el.x); snaps.push({ axis: 'v', pos: bw.pos }) }
-  // 下边（下边缘 = el.y + h）→ 吸附到目标上/下边缘
-  const bottomY = el.y + h
-  let bh = null
-  for (const t of targets) {
-    for (const [d, pos] of [[Math.abs(bottomY - t.y), t.y], [Math.abs(bottomY - (t.y + t.h)), t.y + t.h]]) {
-      if (d < tol && (!bh || d < bh.d)) bh = { d, pos }
+  if (side === 'l') {
+    const leftX = nx
+    let bw = null
+    for (const t of targets) {
+      for (const [d, pos] of [[Math.abs(leftX - t.x), t.x], [Math.abs(leftX - (t.x + t.w)), t.x + t.w]]) {
+        if (d < tol && (!bw || d < bw.d)) bw = { d, pos }
+      }
     }
+    if (bw) { nx = bw.pos; w = Math.max(min.w, ox + drag.ow - nx); snaps.push({ axis: 'v', pos: bw.pos }) }
   }
-  if (bh) { h = Math.max(min.h, bh.pos - el.y); snaps.push({ axis: 'h', pos: bh.pos }) }
+  if (side === 'b' || side === 'br') {
+    const bottomY = ny + h
+    let bh = null
+    for (const t of targets) {
+      for (const [d, pos] of [[Math.abs(bottomY - t.y), t.y], [Math.abs(bottomY - (t.y + t.h)), t.y + t.h]]) {
+        if (d < tol && (!bh || d < bh.d)) bh = { d, pos }
+      }
+    }
+    if (bh) { h = Math.max(min.h, bh.pos - ny); snaps.push({ axis: 'h', pos: bh.pos }) }
+  }
+  if (side === 't') {
+    const topY = ny
+    let bh = null
+    for (const t of targets) {
+      for (const [d, pos] of [[Math.abs(topY - t.y), t.y], [Math.abs(topY - (t.y + t.h)), t.y + t.h]]) {
+        if (d < tol && (!bh || d < bh.d)) bh = { d, pos }
+      }
+    }
+    if (bh) { ny = bh.pos; h = Math.max(min.h, oy + drag.oh - ny); snaps.push({ axis: 'h', pos: bh.pos }) }
+  }
   // 页面边界钳制（吸附之后执行，与移动一致：贴边优先）
   if (drag.page) {
-    w = Math.min(w, drag.page.x + drag.page.w - el.x)
-    h = Math.min(h, drag.page.y + drag.page.h - el.y)
+    if (side === 'r' || side === 'br') w = Math.min(w, drag.page.x + drag.page.w - nx)
+    if (side === 'b' || side === 'br') h = Math.min(h, drag.page.y + drag.page.h - ny)
+    if (side === 'l') {
+      const minX = drag.page.x
+      if (nx < minX) { nx = minX; w = Math.max(min.w, ox + drag.ow - nx) }
+    }
+    if (side === 't') {
+      const minY = drag.page.y
+      if (ny < minY) { ny = minY; h = Math.max(min.h, oy + drag.oh - ny) }
+    }
   }
-  return { w, h, snaps }
+  return { x: nx, y: ny, w, h, snaps }
 }
 
 // ---------- pointer.up / leave 结算 ----------
@@ -395,7 +503,7 @@ export function settleDrag(ctx, drag) {
     }
     return { selection, commit: true }
   }
-  if (drag.mode === 'groupResize' || drag.mode === 'move' || drag.mode === 'resize') {
+  if (drag.mode === 'groupResize' || drag.mode === 'groupEdgeResize' || drag.mode === 'move' || drag.mode === 'resize') {
     return { commit: true }
   }
   return {}

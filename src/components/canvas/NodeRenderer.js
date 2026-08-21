@@ -286,6 +286,11 @@ export function NodeRenderer(props) {
   shape()
 
   if (selected) {
+    // 四边手柄（横向/纵向 resize 视觉指示；命中判定在状态机几何层）：上/下/左/右
+    kids.push(el('rect', { x: e.x - 3, y: e.y - 3, width: e.w + 6, height: 6, className: 'wf-edge wf-edge-ns' }))
+    kids.push(el('rect', { x: e.x - 3, y: e.y + e.h - 3, width: e.w + 6, height: 6, className: 'wf-edge wf-edge-ns' }))
+    kids.push(el('rect', { x: e.x - 3, y: e.y, width: 6, height: e.h, className: 'wf-edge wf-edge-ew' }))
+    kids.push(el('rect', { x: e.x + e.w - 3, y: e.y, width: 6, height: e.h, className: 'wf-edge wf-edge-ew' }))
     kids.push(el('rect', { x: e.x + e.w - 9, y: e.y + e.h - 9, width: 10, height: 10, rx: 2, className: 'wf-handle' }))
   }
   kids.push(renderInlineEdit())

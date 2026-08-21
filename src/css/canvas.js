@@ -31,12 +31,14 @@ export const CANVAS_CSS = `
 .wf-canvas-space .wf-note,
 .wf-canvas-space .wf-text-el,
 .wf-canvas-space .wf-arrow,
-.wf-canvas-space .wf-handle { cursor: grab !important; }
+.wf-canvas-space .wf-handle,
+.wf-canvas-space .wf-edge { cursor: grab !important; }
 .wf-canvas-pan .wf-rect,
 .wf-canvas-pan .wf-note,
 .wf-canvas-pan .wf-text-el,
 .wf-canvas-pan .wf-arrow,
-.wf-canvas-pan .wf-handle { cursor: grabbing !important; }
+.wf-canvas-pan .wf-handle,
+.wf-canvas-pan .wf-edge { cursor: grabbing !important; }
 .wf-rect {
   fill: color-mix(in srgb, var(--wf-accent) 5%, transparent);
   stroke: var(--wf-border-strong); stroke-width: 1.2;
@@ -103,6 +105,10 @@ export const CANVAS_CSS = `
 .wf-arrow.wf-selected { stroke: var(--wf-accent); stroke-width: 2; }
 .wf-rect-text { fill: var(--wf-text-2); font-size: 12px; pointer-events: none; }
 .wf-handle { fill: var(--wf-accent); stroke: var(--wf-bg-sunken); stroke-width: 1.2; cursor: nwse-resize; }
+/* 四边 resize 手柄（上下左右横向/纵向；视觉指示，命中判定在状态机几何层，无需 pointer 事件） */
+.wf-edge { fill: color-mix(in srgb, var(--wf-accent) 16%, transparent); pointer-events: none; }
+.wf-edge-ew { cursor: ew-resize; }
+.wf-edge-ns { cursor: ns-resize; }
 /* 拖动对齐虚线（吸附指示） */
 .wf-snap {
   stroke: var(--wf-accent);
@@ -313,6 +319,19 @@ export const CANVAS_CSS = `
   background: var(--wf-bg-sunken);
   border: 1px solid var(--wf-border); border-radius: 8px;
   padding: 12px;
+}
+/* 浮窗右下角拖拽 resize 手柄（最小尺寸 = 拖拽起点，即当前大小） */
+.wf-float-resize {
+  position: absolute; right: 0; bottom: 0;
+  width: 16px; height: 16px;
+  cursor: nwse-resize;
+}
+.wf-float-resize::after {
+  content: ''; position: absolute; right: 4px; bottom: 4px;
+  width: 6px; height: 6px;
+  border-right: 2px solid var(--wf-text-2);
+  border-bottom: 2px solid var(--wf-text-2);
+  border-bottom-right-radius: 2px;
 }
 
 /* 内联编辑框（双击控件文本/名字） */

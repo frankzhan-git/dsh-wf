@@ -36,6 +36,11 @@ export function useCanvasInteractions(deps) {
     // 编辑框打开时点击画布任意位置：自动保存（onChange 已实时应用）并关闭编辑框。
     // 注：preventDefault 会阻止 input 失焦（blur 不触发），必须在此显式关闭
     if (editing) setEditing(null)
+    // 点击画布任意位置：右侧设置表单立即失焦（受控组件 value 已实时同步，blur 不丢数据）
+    const active = document.activeElement
+    if (active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA' || active.tagName === 'SELECT')) {
+      active.blur()
+    }
     const rect = svgRef.current.getBoundingClientRect()
     const { x, y } = toLocal(ev, rect, zoom, pan)
     const dec = decidePointerDown({
@@ -50,6 +55,10 @@ export function useCanvasInteractions(deps) {
       return
     }
     if (dec.kind === 'groupResize') {
+      setDrag(Object.assign({}, dec.drag, { prev: cloneElements(elements) }))
+      return
+    }
+    if (dec.kind === 'groupEdgeResize') {
       setDrag(Object.assign({}, dec.drag, { prev: cloneElements(elements) }))
       return
     }

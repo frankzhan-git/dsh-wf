@@ -25,6 +25,27 @@ export function CanvasOverlay(props) {
   // 清空二次确认（纯 UI 状态）：点击后进入确认态，超时自动恢复
   const [clearArm, setClearArm] = React.useState(false)
   const clearTimer = React.useRef(null)
+  // 浮窗尺寸（右下角拖拽 resize；初始 = CSS 默认大小，拖拽起点即最小尺寸）
+  const [floatSize, setFloatSize] = React.useState(null)
+  const floatRef = React.useRef(null)
+  const floatResizeRef = React.useRef(null)
+  const startFloatResize = (ev) => {
+    ev.preventDefault(); ev.stopPropagation()
+    const panel = floatRef.current
+    if (!panel || !ev.currentTarget.setPointerCapture) return
+    ev.currentTarget.setPointerCapture(ev.pointerId)
+    floatResizeRef.current = { startX: ev.clientX, startY: ev.clientY, startW: panel.offsetWidth, startH: panel.offsetHeight }
+  }
+  const moveFloatResize = (ev) => {
+    const d = floatResizeRef.current
+    if (!d) return
+    // 最小尺寸 = 拖拽起点（当前大小）
+    setFloatSize({
+      w: Math.max(d.startW, d.startW + (ev.clientX - d.startX)),
+      h: Math.max(d.startH, d.startH + (ev.clientY - d.startY)),
+    })
+  }
+  const endFloatResize = () => { floatResizeRef.current = null }
   const pages = Array.isArray(result.tree) ? result.tree : (result.tree ? [result.tree] : [])
   const safeIdx = Math.min(pvIdx, Math.max(0, pages.length - 1))
   const zoomPct = Math.round(zoom * 100)
@@ -117,7 +138,7 @@ export function CanvasOverlay(props) {
         }, zoomPct + '%'),
       ),
     ),
-    floatTab ? el('div', { className: 'wf-float-panel' },
+    floatTab ? el('div', { ref: floatRef, className: 'wf-float-panel', style: floatSize ? { width: floatSize.w + 'px', height: floatSize.h + 'px' } : null },
       el('div', { className: 'wf-float-head' },
         el('span', null, floatTab === 'jsonl' ? 'JSONL 输出' : '语义预览'),
         el('span', { className: 'wf-spacer' }),
@@ -149,6 +170,15 @@ export function CanvasOverlay(props) {
               pages.length ? el(SemanticPreview, { tree: pages[safeIdx] }) : el('div', { className: 'wf-empty' }, '（画布为空）'),
             ),
           ),
+      // 右下角拖拽 resize 手柄（最小尺寸 = 拖拽起点，即当前大小）
+      el('div', {
+        className: 'wf-float-resize',
+        title: '拖动调整面板大小',
+        onPointerDown: startFloatResize,
+        onPointerMove: moveFloatResize,
+        onPointerUp: endFloatResize,
+        onPointerCancel: endFloatResize,
+      }),
     ) : null,
   )
 }

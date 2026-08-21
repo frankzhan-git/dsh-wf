@@ -4,10 +4,16 @@
 >
 > 让模型精确理解你想要的界面，而不是用文字反复描述、反复猜。
 
-[![v2.1.0](https://img.shields.io/badge/version-2.1.0-2f6feb)](https://github.com/frankzhan-git/dsh-wf)
+[![v2.2.0](https://img.shields.io/badge/version-2.2.0-2f6feb)](https://github.com/frankzhan-git/dsh-wf)
 [![10 套验证全绿](https://img.shields.io/badge/verify-10%20suites%20%E2%9C%93-2ea043)]()
 
 dsh-wf 是 [DeepSeek Harness](https://github.com/deepseek-ai) 的正式插件：在会话输入框的工具行点「草图」按钮唤起轻量画板，绘制界面布局后一键生成 **JSONL 语义描述**，嵌入输入框随你的文字需求一起发给 agent——结构、层级、比例、要求全部精确传达，无需多轮澄清。
+
+---
+
+## 📸 产品截图
+
+![dsh-wf 界面草图插件](view.png)
 
 ---
 

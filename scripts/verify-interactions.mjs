@@ -3,7 +3,7 @@
 import { createElement, cloneElements } from '../src/core/model.js'
 import {
   decidePointerDown, updateDrag, settleDrag, groupBounds, zoomAt,
-  computeMove, computeGroupResize, computeCreate, computeResize, computeMarquee,
+  computeMove, computeGroupResize, computeGroupEdgeResize, computeCreate, computeResize, computeMarquee,
   collectCopySet, buildPaste, PASTE_OFFSET,
 } from '../src/core/interactions.js'
 
@@ -308,6 +308,131 @@ section('事件序列：框选全流程')
   ok(m1.nextDrag.mq.w === 320 && m1.nextDrag.mq.h === 270, '序列：移动更新选框')
   const s = settleDrag({ elements: els }, m1.nextDrag)
   ok(s.selection.length === 2 && s.selection.includes(a.id) && s.selection.includes(b.id), '序列：结算选中两个完全包含元素')
+}
+
+// ---------- 四边 resize（上下左右横向/纵向） ----------
+section('四边 resize：computeResize 按 side 计算')
+{
+  // el(100,100,100,50)，无页面
+  const el = mk(100, 100, 100, 50)
+  const els = [el]
+  const base = { id: el.id, sx: 200, sy: 150, ow: 100, oh: 50, page: null }
+
+  // r：右边缘移动，锚定左
+  const r1 = computeResize({ elements: els }, Object.assign({}, base, { side: 'r' }), 250, 150)
+  ok(r1.w === 150 && r1.x === 100, 'r：宽 +50（左边缘锚定不动）')
+  // l：左边缘移动（起点 sx=100 左边缘），右边缘锚定
+  const r2 = computeResize({ elements: els }, Object.assign({}, base, { side: 'l', sx: 100 }), 120, 125)
+  ok(r2.w === 80 && r2.x === 120, 'l：左边缘右移 20 → x=120, w=80（右边缘 200 不动）')
+  const r3 = computeResize({ elements: els }, Object.assign({}, base, { side: 'l', sx: 100 }), 60, 125)
+  ok(r3.w === 140 && r3.x === 60, 'l：左边缘左移 40 → x=60, w=140')
+  // b：下边缘移动，锚定上
+  const r4 = computeResize({ elements: els }, Object.assign({}, base, { side: 'b' }), 150, 170)
+  ok(r4.h === 70 && r4.y === 100, 'b：高 +20（上边缘锚定不动）')
+  // t：上边缘移动（起点 sy=100 上边缘），下边缘锚定
+  const r5 = computeResize({ elements: els }, Object.assign({}, base, { side: 't', sy: 100 }), 150, 110)
+  ok(r5.h === 40 && r5.y === 110, 't：上边缘下移 10 → y=110, h=40（下边缘 150 不动）')
+  const r6 = computeResize({ elements: els }, Object.assign({}, base, { side: 't', sy: 100 }), 150, 70)
+  ok(r6.h === 80 && r6.y === 70, 't：上边缘上移 30 → y=70, h=80')
+
+  // 最小尺寸钳制（l 向内侧拖：右边缘不动，左边缘回退到 min）
+  const r7 = computeResize({ elements: els }, Object.assign({}, base, { side: 'l', sx: 100 }), 300, 125)
+  ok(r7.w === 24 && r7.x === 176, 'l：最小尺寸钳制（未显式类型 → 容器 24 宽，右边缘 200 不动）')
+
+  // 页面钳制：l 拖出页面左边界 → 贴边
+  const els2 = []
+  const p2 = createElement({ kind: 'rect', type: 'page' }, 20, 20, 300, 200)
+  els2.push(p2)
+  const re2 = mk(100, 100, 100, 50)
+  els2.push(re2)
+  const r8 = computeResize({ elements: els2 }, Object.assign({}, base, { id: re2.id, side: 'l', sx: 100, page: { x: 20, y: 20, w: 300, h: 200 } }), 0, 125)
+  ok(r8.x === 20 && r8.w === 180, 'l：页面钳制（左边缘贴页面左边界，右边缘不动）')
+
+  // 吸附：l 左边缘吸附目标右边缘（target(160,100,20,50) 右边缘 180；最小钳制后左边缘可到 176，5px 容差内）
+  const els3 = []
+  const re3 = mk(100, 100, 100, 50)
+  els3.push(re3)
+  const rt3 = mk(160, 100, 20, 50)
+  els3.push(rt3)
+  const r9 = computeResize({ elements: els3, zoom: 1 }, Object.assign({}, base, { id: re3.id, side: 'l', sx: 100 }), 175, 125)
+  ok(r9.x === 180 && r9.w === 24 && r9.snaps.some((s) => s.axis === 'v' && s.pos === 180), 'l：左边缘吸附到目标右边缘（180，钳制后）')
+}
+
+// ---------- 边手柄命中决策 ----------
+section('四边 resize：pointer.down 边手柄命中')
+{
+  const els = []
+  const page = createElement({ kind: 'rect', type: 'page' }, 20, 20, 760, 480)
+  els.push(page)
+  const btn = mk(100, 100, 200, 60, 'button')
+  btn.text = '登录'
+  els.push(btn)
+
+  const d1 = decidePointerDown({ elements: els, mode: 'select', zoom: 1, selectedIds: [], spaceDown: false, pan: { x: 0, y: 0 } }, 100, 130, 100, 130)
+  ok(d1.kind === 'resize' && d1.drag.side === 'l', '左边缘带命中 → resize side=l')
+  const d2 = decidePointerDown({ elements: els, mode: 'select', zoom: 1, selectedIds: [], spaceDown: false, pan: { x: 0, y: 0 } }, 300, 130, 300, 130)
+  ok(d2.kind === 'resize' && d2.drag.side === 'r', '右边缘带命中 → resize side=r')
+  const d3 = decidePointerDown({ elements: els, mode: 'select', zoom: 1, selectedIds: [], spaceDown: false, pan: { x: 0, y: 0 } }, 200, 100, 200, 100)
+  ok(d3.kind === 'resize' && d3.drag.side === 't', '上边缘带命中 → resize side=t')
+  const d4 = decidePointerDown({ elements: els, mode: 'select', zoom: 1, selectedIds: [], spaceDown: false, pan: { x: 0, y: 0 } }, 200, 160, 200, 160)
+  ok(d4.kind === 'resize' && d4.drag.side === 'b', '下边缘带命中 → resize side=b')
+  const d5 = decidePointerDown({ elements: els, mode: 'select', zoom: 1, selectedIds: [], spaceDown: false, pan: { x: 0, y: 0 } }, 293, 153, 293, 153)
+  ok(d5.kind === 'resize' && d5.drag.side === 'br', '右下角手柄命中 → resize side=br（原行为）')
+  const d6 = decidePointerDown({ elements: els, mode: 'select', zoom: 1, selectedIds: [], spaceDown: false, pan: { x: 0, y: 0 } }, 200, 130, 200, 130)
+  ok(d6.kind === 'move', '控件内部命中 → move')
+}
+
+// ---------- 多选外框四边 resize（幅度与移动量一致，线性非等比） ----------
+section('多选外框四边 resize：computeGroupEdgeResize')
+{
+  // A(100,100,100,60) B(250,100,100,60) → gb=(100,100,250,60)
+  const els = [mk(100, 100, 100, 60), mk(250, 100, 100, 60)]
+  const ids = els.map((e) => e.id)
+  const gb = groupBounds(els, ids)
+
+  // r：右边移动 dx=+50 → 每个控件 w += 50（左边缘不动）
+  const r1 = computeGroupEdgeResize({ elements: els, selectedIds: ids }, { mode: 'groupEdgeResize', side: 'r', sx: gb.x + gb.w, sy: gb.y, gb }, gb.x + gb.w + 50, gb.y)
+  const a1 = r1.find((p) => p.id === els[0].id)
+  const b1 = r1.find((p) => p.id === els[1].id)
+  ok(a1.w === 150 && a1.x === undefined && b1.w === 150, 'r：每个控件宽 +50（幅度与虚线框移动量一致）')
+
+  // l：左边移动 dx=+20 → 每个控件 x += 20 且 w -= 20（右边缘不动）
+  const r2 = computeGroupEdgeResize({ elements: els, selectedIds: ids }, { mode: 'groupEdgeResize', side: 'l', sx: gb.x, sy: gb.y, gb }, gb.x + 20, gb.y)
+  const a2 = r2.find((p) => p.id === els[0].id)
+  const b2 = r2.find((p) => p.id === els[1].id)
+  ok(a2.x === 120 && a2.w === 80, 'l：A 左边缘右移 20（x=120, w=80，右边缘 200 不动）')
+  ok(b2.x === 270 && b2.w === 80, 'l：B 左边缘右移 20（x=270, w=80，右边缘 350 不动）')
+
+  // b：下边移动 dy=+30 → 每个控件 h += 30
+  const r3 = computeGroupEdgeResize({ elements: els, selectedIds: ids }, { mode: 'groupEdgeResize', side: 'b', sx: gb.x, sy: gb.y + gb.h, gb }, gb.x, gb.y + gb.h + 30)
+  ok(r3.every((p) => p.h === 90), 'b：每个控件高 +30')
+
+  // t：上边移动 dy=+10 → 每个控件 y += 10 且 h -= 10（下边缘不动）
+  const r4 = computeGroupEdgeResize({ elements: els, selectedIds: ids }, { mode: 'groupEdgeResize', side: 't', sx: gb.x, sy: gb.y, gb }, gb.x, gb.y + 10)
+  ok(r4.every((p) => p.y === 110 && p.h === 50), 't：每个控件上边缘下移 10（y=110, h=50，下边缘 160 不动）')
+
+  // 最小尺寸钳制：l 大幅度右移 → 宽到类型最小（未显式类型 → 容器 24），右边缘保持
+  const r5 = computeGroupEdgeResize({ elements: els, selectedIds: ids }, { mode: 'groupEdgeResize', side: 'l', sx: gb.x, sy: gb.y, gb }, gb.x + 300, gb.y)
+  const a5 = r5.find((p) => p.id === els[0].id)
+  ok(a5.w === 24 && a5.x === 176, 'l：最小尺寸钳制（A 宽 24，右边缘 200 不动）')
+}
+
+// ---------- 多选外框边手柄命中决策 ----------
+section('多选外框四边 resize：pointer.down 边手柄命中')
+{
+  // L 形布局：A(100,200,100,60) B(200,100,100,60) → gb=(100,100,200,160)
+  const els = [mk(100, 200, 100, 60), mk(200, 100, 100, 60)]
+  const ids = els.map((e) => e.id)
+  const gb = groupBounds(els, ids)
+
+  const d1 = decidePointerDown({ elements: els, mode: 'select', zoom: 1, selectedIds: ids, spaceDown: false, pan: { x: 0, y: 0 } }, gb.x - 5, 180, gb.x - 5, 180)
+  ok(d1.kind === 'groupEdgeResize' && d1.drag.side === 'l', '外框左边带命中 → groupEdgeResize side=l')
+  const d2 = decidePointerDown({ elements: els, mode: 'select', zoom: 1, selectedIds: ids, spaceDown: false, pan: { x: 0, y: 0 } }, 150, gb.y - 5, 150, gb.y - 5)
+  ok(d2.kind === 'groupEdgeResize' && d2.drag.side === 't', '外框上边带命中 → groupEdgeResize side=t')
+  const d3 = decidePointerDown({ elements: els, mode: 'select', zoom: 1, selectedIds: ids, spaceDown: false, pan: { x: 0, y: 0 } }, gb.x, gb.y, gb.x, gb.y)
+  ok(d3.kind === 'groupResize' && d3.drag.corner === 'tl', '外框角（空白角）→ groupResize 等比（角优先于边）')
+  const d4 = decidePointerDown({ elements: els, mode: 'select', zoom: 1, selectedIds: ids, spaceDown: false, pan: { x: 0, y: 0 } }, 320, 180, 320, 180)
+  ok(d4.kind === 'marquee', '外框之外空白 → marquee')
 }
 
 // ---------- 复制 / 粘贴 ----------
