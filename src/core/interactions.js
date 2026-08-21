@@ -86,6 +86,24 @@ export function hitGroupEdge(gb, x, y, handle) {
   return null
 }
 
+// 元素边带命中（从上层到下层遍历全部元素，与 hitTest 同序）：
+// 边带含元素外侧（边缘 ±8/zoom）——光标已在元素外提示可调整（ew/ns），
+// 点击边缘外侧也必须触发 resize，否则落入空白误触发框选/选中
+export function hitEdgeOfAny(elements, x, y, zoom) {
+  const cw = 14 / zoom
+  const cOut = 8 / zoom
+  for (let i = elements.length - 1; i >= 0; i--) {
+    const e = elements[i]
+    if (e.kind === 'arrow') continue
+    // 右下角区域（14px 内 + 外侧 8px，双向）：必须限界，否则元素外无限延伸误命中
+    const onCorner = x > e.x + e.w - cw && x < e.x + e.w + cOut && y > e.y + e.h - cw && y < e.y + e.h + cOut
+    if (onCorner) return { el: e, side: 'br' }
+    const edge = hitEdgeOf(e, x, y, zoom)
+    if (edge) return { el: e, side: edge }
+  }
+  return null
+}
+
 export function decidePointerDown(ctx, x, y, clientX, clientY) {
   // 空格按住 = 平移画布（屏幕像素直算，不经坐标换算）
   if (ctx.spaceDown) {
@@ -102,6 +120,26 @@ export function decidePointerDown(ctx, x, y, clientX, clientY) {
       return { kind: 'groupEdgeResize', drag: { mode: 'groupEdgeResize', side: gSide, sx: x, sy: y, gb } }
     }
   }
+  // 元素边带优先（先于 hitTest）：光标已在元素边缘（含外侧 ±8/zoom）提示可调整，
+  // 点击边缘外侧也必须触发 resize——否则落入空白误触发框选/选中（Ctrl 保持切换语义）
+  if (mode === 'select' && !ctx.ctrl) {
+    const edgeHit = hitEdgeOfAny(elements, x, y, zoom)
+    if (edgeHit) {
+      const el = edgeHit.el
+      const keepMulti = !!(selectedIds.length > 1 && selectedIds.indexOf(el.id) !== -1)
+      const page = elements.find((e) => e.type === 'page' && e.id !== el.id
+        && el.x + el.w / 2 >= e.x && el.x + el.w / 2 <= e.x + e.w
+        && el.y + el.h / 2 >= e.y && el.y + el.h / 2 <= e.y + e.h)
+      const pageSnap = page ? { x: page.x, y: page.y, w: page.w, h: page.h } : null
+      const drag = {
+        mode: 'resize', id: el.id, sx: x, sy: y,
+        ox: el.x, oy: el.y, ow: el.w, oh: el.h,
+        side: edgeHit.side, // br=右下角，l/r/t/b=四边
+        prev: null, page: pageSnap,
+      }
+      return { kind: 'resize', drag, sel: keepMulti ? null : [el.id] }
+    }
+  }
   // 命中已有控件：选中 + 移动 / 边或右下角改大小
   const hit = hitTest(elements, x, y)
   // 控件模式下「容器类」命中（页面/容器/未显式类型矩形）视为空白：可在其内部继续绘制控件
@@ -110,6 +148,7 @@ export function decidePointerDown(ctx, x, y, clientX, clientY) {
   const hitNonContainerInDraw = !!(hit && mode === 'draw' && !hitContainerLike)
   if (hit && !hitContainerLike) {
     const onCorner = hit.kind !== 'arrow' && x > hit.x + hit.w - 14 / zoom && y > hit.y + hit.h - 14 / zoom
+      && x < hit.x + hit.w + 8 / zoom && y < hit.y + hit.h + 8 / zoom
     const edge = hit.kind !== 'arrow' ? hitEdgeOf(hit, x, y, zoom) : null
     const onHandle = hit.kind !== 'arrow' && (onCorner || edge !== null)
     if (mode === 'draw' && !onHandle) {
@@ -175,10 +214,10 @@ export function updateDrag(ctx, drag, x, y, clientX, clientY) {
   if (drag.mode === 'marquee') return { nextDrag: Object.assign({}, drag, { mq: computeMarquee(drag, x, y) }) }
   if (drag.mode === 'groupResize') return { patches: computeGroupResize(ctx, drag, x, y) }
   if (drag.mode === 'groupEdgeResize') {
-    const patches = computeGroupEdgeResize(ctx, drag, x, y)
+    const r = computeGroupEdgeResize(ctx, drag, x, y)
     // 记录本帧累计位移（多帧拖动增量：computeGroupEdgeResize 用 lastDx/lastDy 计算每帧增量，
     // 避免 elements 每帧更新后把累计位移重复累加导致「放大」）
-    return { patches, lastDx: x - drag.sx, lastDy: y - drag.sy }
+    return { patches: r.patches, snaps: r.snaps, lastDx: x - drag.sx, lastDy: y - drag.sy }
   }
   if (drag.mode === 'resize') {
     // resize 附带对齐吸附：patch 与吸附虚线分开返回（与 move 一致）
@@ -367,13 +406,64 @@ export function computeGroupResize(ctx, drag, x, y) {
 //  - t：上边移动 → 每个控件 y += 本帧增量 且 h -= 本帧增量（下边缘不动）
 // 增量语义：dx/dy 为本帧位移（累计位移 - lastDx/lastDy）；拖动中 elements 每帧更新，
 // 若用累计位移加到当前值会重复累加导致「放大」（与 computeMove 多帧修复同款）
+// 吸附：移动边（外框边）与「非选中元素」边缘对齐（容差 6/zoom，与 move/resize 一致），
+//       命中时全部控件按吸附修正量统一偏移；返回 { patches, snaps }（snaps 供吸附虚线）
 // 钳制：每控件按类型最小尺寸（钳制时该控件幅度不足满量，属必要保护）
 export function computeGroupEdgeResize(ctx, drag, x, y) {
   const side = drag.side
-  const dx = side === 'l' || side === 'r' ? (x - drag.sx) - (drag.lastDx || 0) : 0
-  const dy = side === 't' || side === 'b' ? (y - drag.sy) - (drag.lastDy || 0) : 0
+  const gb = drag.gb
+  const cumX = x - drag.sx
+  const cumY = y - drag.sy
+  const incX = side === 'l' || side === 'r' ? cumX - (drag.lastDx || 0) : 0
+  const incY = side === 't' || side === 'b' ? cumY - (drag.lastDy || 0) : 0
   const idSet = new Set(ctx.selectedIds)
+  // 移动边吸附（目标 = 非选中元素；容差与 move/resize 一致）
+  const tol = 6 / (ctx.zoom || 1)
+  const snaps = []
+  const targets = ctx.elements.filter((t) => !idSet.has(t.id) && t.kind !== 'arrow')
+  let adjX = 0
+  let adjY = 0
+  if (side === 'r') {
+    const edge = gb.x + gb.w + cumX
+    let bw = null
+    for (const t of targets) {
+      for (const [d, pos] of [[Math.abs(edge - t.x), t.x], [Math.abs(edge - (t.x + t.w)), t.x + t.w]]) {
+        if (d < tol && (!bw || d < bw.d)) bw = { d, pos }
+      }
+    }
+    if (bw) { adjX = bw.pos - edge; snaps.push({ axis: 'v', pos: bw.pos }) }
+  } else if (side === 'l') {
+    const edge = gb.x + cumX
+    let bw = null
+    for (const t of targets) {
+      for (const [d, pos] of [[Math.abs(edge - t.x), t.x], [Math.abs(edge - (t.x + t.w)), t.x + t.w]]) {
+        if (d < tol && (!bw || d < bw.d)) bw = { d, pos }
+      }
+    }
+    if (bw) { adjX = bw.pos - edge; snaps.push({ axis: 'v', pos: bw.pos }) }
+  } else if (side === 'b') {
+    const edge = gb.y + gb.h + cumY
+    let bh = null
+    for (const t of targets) {
+      for (const [d, pos] of [[Math.abs(edge - t.y), t.y], [Math.abs(edge - (t.y + t.h)), t.y + t.h]]) {
+        if (d < tol && (!bh || d < bh.d)) bh = { d, pos }
+      }
+    }
+    if (bh) { adjY = bh.pos - edge; snaps.push({ axis: 'h', pos: bh.pos }) }
+  } else if (side === 't') {
+    const edge = gb.y + cumY
+    let bh = null
+    for (const t of targets) {
+      for (const [d, pos] of [[Math.abs(edge - t.y), t.y], [Math.abs(edge - (t.y + t.h)), t.y + t.h]]) {
+        if (d < tol && (!bh || d < bh.d)) bh = { d, pos }
+      }
+    }
+    if (bh) { adjY = bh.pos - edge; snaps.push({ axis: 'h', pos: bh.pos }) }
+  }
+  // 逐控件应用：本帧增量 + 吸附修正
   const patches = []
+  const dx = incX + adjX
+  const dy = incY + adjY
   for (const e of ctx.elements) {
     if (!idSet.has(e.id)) continue
     const min = minSizeOf(ctx.elements, e)
@@ -391,7 +481,7 @@ export function computeGroupEdgeResize(ctx, drag, x, y) {
     }
     patches.push(p)
   }
-  return patches
+  return { patches, snaps }
 }
 
 // 改尺寸（右下角手柄或四边）：按类型最小尺寸 + 移动边对齐吸附（阈值 6/zoom 与移动一致）+ 页面边界钳制

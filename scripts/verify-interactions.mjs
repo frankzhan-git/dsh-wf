@@ -382,6 +382,19 @@ section('四边 resize：pointer.down 边手柄命中')
   ok(d5.kind === 'resize' && d5.drag.side === 'br', '右下角手柄命中 → resize side=br（原行为）')
   const d6 = decidePointerDown({ elements: els, mode: 'select', zoom: 1, selectedIds: [], spaceDown: false, pan: { x: 0, y: 0 } }, 200, 130, 200, 130)
   ok(d6.kind === 'move', '控件内部命中 → move')
+
+  // 元素边带优先于 hitTest（修复「光标已显示可拖但点击变选中」）：
+  // 点击元素边缘外侧（光标 ew/ns 区域）→ 触发 resize，而非落入空白误触发框选
+  const elsO = [mk(100, 100, 100, 60)]
+  const dO1 = decidePointerDown({ elements: elsO, mode: 'select', zoom: 1, selectedIds: [], spaceDown: false, pan: { x: 0, y: 0 } }, 95, 130, 95, 130)
+  ok(dO1.kind === 'resize' && dO1.drag.side === 'l', '左边缘外侧 5px 点击 → resize（不落入空白框选）')
+  const dO2 = decidePointerDown({ elements: elsO, mode: 'select', zoom: 1, selectedIds: [], spaceDown: false, pan: { x: 0, y: 0 } }, 205, 165, 205, 165)
+  ok(dO2.kind === 'resize' && dO2.drag.side === 'br', '右下角外侧点击 → resize br（对侧双向）')
+  const dO3 = decidePointerDown({ elements: elsO, mode: 'select', zoom: 1, selectedIds: [], spaceDown: false, pan: { x: 0, y: 0 } }, 150, 94, 150, 94)
+  ok(dO3.kind === 'resize' && dO3.drag.side === 't', '上边缘外侧 6px 点击 → resize t')
+  // 超出边带（边缘 8px 外）→ 仍为空白行为
+  const dO4 = decidePointerDown({ elements: elsO, mode: 'select', zoom: 1, selectedIds: [], spaceDown: false, pan: { x: 0, y: 0 } }, 85, 130, 85, 130)
+  ok(dO4.kind === 'marquee', '边缘外侧超过边带（15px）→ 空白框选')
 }
 
 // ---------- 多选外框四边 resize（幅度与移动量一致，线性非等比） ----------
@@ -394,29 +407,43 @@ section('多选外框四边 resize：computeGroupEdgeResize')
 
   // r：右边移动 dx=+50 → 每个控件 w += 50（左边缘不动）
   const r1 = computeGroupEdgeResize({ elements: els, selectedIds: ids }, { mode: 'groupEdgeResize', side: 'r', sx: gb.x + gb.w, sy: gb.y, gb }, gb.x + gb.w + 50, gb.y)
-  const a1 = r1.find((p) => p.id === els[0].id)
-  const b1 = r1.find((p) => p.id === els[1].id)
+  const a1 = r1.patches.find((p) => p.id === els[0].id)
+  const b1 = r1.patches.find((p) => p.id === els[1].id)
   ok(a1.w === 150 && a1.x === undefined && b1.w === 150, 'r：每个控件宽 +50（幅度与虚线框移动量一致）')
 
   // l：左边移动 dx=+20 → 每个控件 x += 20 且 w -= 20（右边缘不动）
   const r2 = computeGroupEdgeResize({ elements: els, selectedIds: ids }, { mode: 'groupEdgeResize', side: 'l', sx: gb.x, sy: gb.y, gb }, gb.x + 20, gb.y)
-  const a2 = r2.find((p) => p.id === els[0].id)
-  const b2 = r2.find((p) => p.id === els[1].id)
+  const a2 = r2.patches.find((p) => p.id === els[0].id)
+  const b2 = r2.patches.find((p) => p.id === els[1].id)
   ok(a2.x === 120 && a2.w === 80, 'l：A 左边缘右移 20（x=120, w=80，右边缘 200 不动）')
   ok(b2.x === 270 && b2.w === 80, 'l：B 左边缘右移 20（x=270, w=80，右边缘 350 不动）')
 
   // b：下边移动 dy=+30 → 每个控件 h += 30
   const r3 = computeGroupEdgeResize({ elements: els, selectedIds: ids }, { mode: 'groupEdgeResize', side: 'b', sx: gb.x, sy: gb.y + gb.h, gb }, gb.x, gb.y + gb.h + 30)
-  ok(r3.every((p) => p.h === 90), 'b：每个控件高 +30')
+  ok(r3.patches.every((p) => p.h === 90), 'b：每个控件高 +30')
 
   // t：上边移动 dy=+10 → 每个控件 y += 10 且 h -= 10（下边缘不动）
   const r4 = computeGroupEdgeResize({ elements: els, selectedIds: ids }, { mode: 'groupEdgeResize', side: 't', sx: gb.x, sy: gb.y, gb }, gb.x, gb.y + 10)
-  ok(r4.every((p) => p.y === 110 && p.h === 50), 't：每个控件上边缘下移 10（y=110, h=50，下边缘 160 不动）')
+  ok(r4.patches.every((p) => p.y === 110 && p.h === 50), 't：每个控件上边缘下移 10（y=110, h=50，下边缘 160 不动）')
 
   // 最小尺寸钳制：l 大幅度右移 → 宽到类型最小（未显式类型 → 容器 24），右边缘保持
   const r5 = computeGroupEdgeResize({ elements: els, selectedIds: ids }, { mode: 'groupEdgeResize', side: 'l', sx: gb.x, sy: gb.y, gb }, gb.x + 300, gb.y)
-  const a5 = r5.find((p) => p.id === els[0].id)
+  const a5 = r5.patches.find((p) => p.id === els[0].id)
   ok(a5.w === 24 && a5.x === 176, 'l：最小尺寸钳制（A 宽 24，右边缘 200 不动）')
+
+  // 批量吸附：外框右边缘与「非选中元素」左边缘对齐（容差 6/zoom，与 move/resize 一致）
+  // A(100,100,100,60) B(250,100,100,60) 选中；C(420,100,60,30) 未选中
+  const elsS = [mk(100, 100, 100, 60), mk(250, 100, 100, 60), mk(420, 100, 60, 30)]
+  const idsS = elsS.slice(0, 2).map((e) => e.id)
+  const gbS = groupBounds(elsS, idsS) // (100,100,250,60)，右边缘 350
+  const rS = computeGroupEdgeResize({ elements: elsS, selectedIds: idsS, zoom: 1 }, { mode: 'groupEdgeResize', side: 'r', sx: gbS.x + gbS.w, sy: gbS.y, gb: gbS }, gbS.x + gbS.w + 67, gbS.y)
+  const aS = rS.patches.find((p) => p.id === elsS[0].id)
+  const bS = rS.patches.find((p) => p.id === elsS[1].id)
+  ok(aS.w === 170 && bS.w === 170, '吸附：外框右边缘吸附到 C 左边缘 420（各控件宽 +70，吸附修正 +3）')
+  ok(rS.snaps.some((s) => s.axis === 'v' && s.pos === 420), '吸附：产生垂直吸附线')
+  // 超出容差（外框右边缘距 C 左边缘 7px > 6px）→ 不吸附
+  const rS2 = computeGroupEdgeResize({ elements: elsS, selectedIds: idsS, zoom: 1 }, { mode: 'groupEdgeResize', side: 'r', sx: gbS.x + gbS.w, sy: gbS.y, gb: gbS }, gbS.x + gbS.w + 63, gbS.y)
+  ok(rS2.patches[0].w === 163 && rS2.snaps.length === 0, '吸附：超出容差不吸附（宽 +63）')
 
   // 多帧回归（修复「放大」）：拖动中 elements 每帧更新，增量必须按本帧位移计算，
   // 否则累计位移重复累加（旧 bug：第 2 帧 w = 110 + 20 = 130，应为 120）
@@ -425,10 +452,10 @@ section('多选外框四边 resize：computeGroupEdgeResize')
   const gbF = groupBounds(elsF, idsF)
   const dragF = { mode: 'groupEdgeResize', side: 'r', sx: gbF.x + gbF.w, sy: gbF.y, gb: gbF }
   const f1 = computeGroupEdgeResize({ elements: elsF, selectedIds: idsF }, dragF, gbF.x + gbF.w + 10, gbF.y)          // 第 1 帧：+10
-  const elsF2 = elsF.map((e) => { const p = f1.find((x) => x.id === e.id); return p ? Object.assign({}, e, p) : e })
+  const elsF2 = elsF.map((e) => { const p = f1.patches.find((x) => x.id === e.id); return p ? Object.assign({}, e, p) : e })
   const f2 = computeGroupEdgeResize({ elements: elsF2, selectedIds: idsF }, Object.assign({}, dragF, { lastDx: 10 }), gbF.x + gbF.w + 20, gbF.y)  // 第 2 帧：累计 +20
-  const aF1 = f1.find((p) => p.id === elsF[0].id)
-  const aF2 = f2.find((p) => p.id === elsF[0].id)
+  const aF1 = f1.patches.find((p) => p.id === elsF[0].id)
+  const aF2 = f2.patches.find((p) => p.id === elsF[0].id)
   ok(aF1.w === 110, '多帧：第 1 帧宽 +10（110）')
   ok(aF2.w === 120, '多帧：第 2 帧只加本帧增量（110+10=120，不重复累加成 130）')
 }
