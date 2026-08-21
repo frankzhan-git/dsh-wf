@@ -60,13 +60,15 @@ section('pointer.down 决策')
   const d7 = decidePointerDown({ elements: els, mode: 'select', zoom: 1, selectedIds: [], spaceDown: true, pan: { x: 10, y: 20 } }, 100, 100, 300, 200)
   ok(d7.kind === 'pan' && d7.drag.px === 10 && d7.drag.sy === 200, '空格 → pan（记录视口与屏幕起点）')
 
-  // 多选外框角手柄 → groupResize：外框角必须落在空白（L 形布局：tl 角由两个元素的不同边构成）
-  // A(100,200) 顶左边缘，B(200,100) 顶右边缘 → 外框 tl=(100,100) 处无元素
+  // 多选外框边带命中（四角已移除：角按 r > b > l > t 归边）→ groupEdgeResize
+  // A(100,200,100,60) B(200,100,100,60) → 外框 tl=(100,100)
   const els2 = [mk(100, 200, 100, 60), mk(200, 100, 100, 60)]
   const ids2 = els2.map((e) => e.id)
   const gb = groupBounds(els2, ids2)
   const d8 = decidePointerDown({ elements: els2, mode: 'select', zoom: 1, selectedIds: ids2, spaceDown: false, pan: { x: 0, y: 0 } }, gb.x, gb.y, gb.x, gb.y)
-  ok(d8.kind === 'groupResize' && d8.drag.corner === 'tl', '多选外框角手柄（空白角）→ groupResize')
+  ok(d8.kind === 'groupEdgeResize' && d8.drag.side === 'l', '外框角（空白角）→ groupEdgeResize（角归边，无四角等比）')
+  const d8b = decidePointerDown({ elements: els2, mode: 'select', zoom: 1, selectedIds: ids2, spaceDown: false, pan: { x: 0, y: 0 } }, gb.x + gb.w, gb.y + gb.h, gb.x + gb.w, gb.y + gb.h)
+  ok(d8b.kind === 'groupEdgeResize' && d8b.drag.side === 'r', '外框右下角 → groupEdgeResize（r 优先于 b）')
 }
 
 // ---------- 吸附 / 钳制 / 跟随 ----------
@@ -430,9 +432,18 @@ section('多选外框四边 resize：pointer.down 边手柄命中')
   const d2 = decidePointerDown({ elements: els, mode: 'select', zoom: 1, selectedIds: ids, spaceDown: false, pan: { x: 0, y: 0 } }, 150, gb.y - 5, 150, gb.y - 5)
   ok(d2.kind === 'groupEdgeResize' && d2.drag.side === 't', '外框上边带命中 → groupEdgeResize side=t')
   const d3 = decidePointerDown({ elements: els, mode: 'select', zoom: 1, selectedIds: ids, spaceDown: false, pan: { x: 0, y: 0 } }, gb.x, gb.y, gb.x, gb.y)
-  ok(d3.kind === 'groupResize' && d3.drag.corner === 'tl', '外框角（空白角）→ groupResize 等比（角优先于边）')
+  ok(d3.kind === 'groupEdgeResize' && d3.drag.side === 'l', '外框角（空白角）→ groupEdgeResize（角归边，无四角等比）')
   const d4 = decidePointerDown({ elements: els, mode: 'select', zoom: 1, selectedIds: ids, spaceDown: false, pan: { x: 0, y: 0 } }, 320, 180, 320, 180)
   ok(d4.kind === 'marquee', '外框之外空白 → marquee')
+  // 回归：多选外框边带优先于元素命中——点贴框元素的边缘（元素上边缘 = 外框上边）→ 批量调整而非单元素
+  const elsB = [mk(100, 100, 100, 60), mk(250, 100, 100, 60)]
+  const idsB = elsB.map((e) => e.id)
+  const gbB = groupBounds(elsB, idsB)
+  const dB = decidePointerDown({ elements: elsB, mode: 'select', zoom: 1, selectedIds: idsB, spaceDown: false, pan: { x: 0, y: 0 } }, 300, 100, 300, 100)
+  ok(dB.kind === 'groupEdgeResize' && dB.drag.side === 't', '边带优先：点贴框元素的上边缘 → 批量（不被单元素命中抢走）')
+  // 多选态点框内元素内部（非边带）→ 仍走元素（移动/单选）
+  const dC = decidePointerDown({ elements: elsB, mode: 'select', zoom: 1, selectedIds: idsB, spaceDown: false, pan: { x: 0, y: 0 } }, 150, 130, 150, 130)
+  ok(dC.kind === 'move' && dC.drag.id === elsB[0].id, '框内元素内部 → 元素操作（保持多选整体移动）')
 }
 
 // ---------- 复制 / 粘贴 ----------

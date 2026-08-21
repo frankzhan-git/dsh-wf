@@ -55,12 +55,12 @@ export function zoomAt(factor, zoom, pan) {
 // ctx = { elements, mode, zoom, selectedIds, spaceDown, pan }
 // 返回动作清单：
 //  { kind: 'pan', drag } | { kind: 'select', ids } | { kind: 'toggle', ids }
-//  | { kind: 'move'|'resize', drag } | { kind: 'marquee', drag } | { kind: 'groupResize', drag }
-//  | { kind: 'groupEdgeResize', drag } | { kind: 'create', element, drag } | { kind: 'limit' }（数量上限，由调用方 toast）
+//  | { kind: 'move'|'resize', drag } | { kind: 'marquee', drag } | { kind: 'groupEdgeResize', drag }
+//  | { kind: 'create', element, drag } | { kind: 'limit' }（数量上限，由调用方 toast）
 
-// 边手柄命中（四边横向/纵向 resize）：边缘带 6/zoom（逻辑像素），排除右下角手柄区域（角优先）
+// 边手柄命中（四边横向/纵向 resize）：边缘带 8/zoom（逻辑像素），右下角手柄区域优先（角优先）
 export function hitEdgeOf(el, x, y, zoom) {
-  const th = 6 / zoom
+  const th = 8 / zoom
   const onRight = Math.abs(x - (el.x + el.w)) <= th && y > el.y && y < el.y + el.h
   const onLeft = Math.abs(x - el.x) <= th && y > el.y && y < el.y + el.h
   const onBottom = Math.abs(y - (el.y + el.h)) <= th && x > el.x && x < el.x + el.w
@@ -72,12 +72,36 @@ export function hitEdgeOf(el, x, y, zoom) {
   return null
 }
 
+// 多选外框边带命中（批量横向/纵向调整）：框线及内外 handle 宽的带状区域；
+// 不排除角（角 = 两条边的交点，按 r > b > l > t 优先级归边）
+export function hitGroupEdge(gb, x, y, handle) {
+  const nearR = Math.abs(x - (gb.x + gb.w)) <= handle && y >= gb.y && y <= gb.y + gb.h
+  const nearB = Math.abs(y - (gb.y + gb.h)) <= handle && x >= gb.x && x <= gb.x + gb.w
+  const nearL = Math.abs(x - gb.x) <= handle && y >= gb.y && y <= gb.y + gb.h
+  const nearT = Math.abs(y - gb.y) <= handle && x >= gb.x && x <= gb.x + gb.w
+  if (nearR) return 'r'
+  if (nearB) return 'b'
+  if (nearL) return 'l'
+  if (nearT) return 't'
+  return null
+}
+
 export function decidePointerDown(ctx, x, y, clientX, clientY) {
   // 空格按住 = 平移画布（屏幕像素直算，不经坐标换算）
   if (ctx.spaceDown) {
     return { kind: 'pan', drag: { mode: 'pan', sx: clientX, sy: clientY, px: ctx.pan.x, py: ctx.pan.y } }
   }
   const { elements, mode, zoom, selectedIds } = ctx
+  // 多选外框边带优先（先于元素命中）：多选态下点击虚线框附近 → 批量横向/纵向调整，
+  // 不被紧贴外框边缘的元素抢走（这是四边批量可用的关键）
+  if (mode === 'select' && selectedIds.length > 1) {
+    const gb = groupBounds(elements, selectedIds)
+    const handle = 10 / zoom
+    const gSide = hitGroupEdge(gb, x, y, handle)
+    if (gSide) {
+      return { kind: 'groupEdgeResize', drag: { mode: 'groupEdgeResize', side: gSide, sx: x, sy: y, gb } }
+    }
+  }
   // 命中已有控件：选中 + 移动 / 边或右下角改大小
   const hit = hitTest(elements, x, y)
   // 控件模式下「容器类」命中（页面/容器/未显式类型矩形）视为空白：可在其内部继续绘制控件
@@ -124,32 +148,6 @@ export function decidePointerDown(ctx, x, y, clientX, clientY) {
   }
   // 未命中（或控件模式命中容器/页面 = 空白）
   if (mode === 'select') {
-    // 多选外框手柄命中 → 批量缩放：四角等比（原行为）+ 四边横向/纵向（幅度与移动量一致）
-    if (selectedIds.length > 1) {
-      const gb = groupBounds(elements, selectedIds)
-      const handle = 10 / zoom
-      const corners = [
-        { k: 'tl', x: gb.x, y: gb.y },
-        { k: 'tr', x: gb.x + gb.w, y: gb.y },
-        { k: 'bl', x: gb.x, y: gb.y + gb.h },
-        { k: 'br', x: gb.x + gb.w, y: gb.y + gb.h },
-      ]
-      const hitCorner = corners.find((c) => x >= c.x - handle && x <= c.x + handle && y >= c.y - handle && y <= c.y + handle)
-      if (hitCorner) {
-        return { kind: 'groupResize', drag: { mode: 'groupResize', corner: hitCorner.k, sx: x, sy: y, gb } }
-      }
-      // 四边（排除角带）：上下左右均可横向/纵向批量调整
-      const inX = x >= gb.x + handle && x <= gb.x + gb.w - handle
-      const inY = y >= gb.y + handle && y <= gb.y + gb.h - handle
-      let side = null
-      if (inX && y >= gb.y - handle && y <= gb.y + handle) side = 't'
-      else if (inX && y >= gb.y + gb.h - handle && y <= gb.y + gb.h + handle) side = 'b'
-      else if (inY && x >= gb.x - handle && x <= gb.x + handle) side = 'l'
-      else if (inY && x >= gb.x + gb.w - handle && x <= gb.x + gb.w + handle) side = 'r'
-      if (side) {
-        return { kind: 'groupEdgeResize', drag: { mode: 'groupEdgeResize', side, sx: x, sy: y, gb } }
-      }
-    }
     // 空白处按下 → 开始框选（marquee），单击空白 = 取消多选
     return { kind: 'marquee', drag: { mode: 'marquee', sx: x, sy: y } }
   }
