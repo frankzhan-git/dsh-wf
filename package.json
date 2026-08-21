@@ -1,6 +1,6 @@
 {
   "name": "dsh-wf",
-  "version": "2.2.3",
+  "version": "2.2.4",
   "description": "界面草图：会话输入框内绘制界面草图，一键转为 JSONL 语义嵌入输入框，随需求发给 DSH agent",
   "private": true,
   "type": "module",

@@ -258,7 +258,8 @@ export const CANVAS_CSS = `
 .wf-zoom-pct-click:hover { background: color-mix(in srgb, var(--wf-accent) 12%, transparent); }
 .wf-zoom-pct:disabled { cursor: default; }
 .wf-float-panel {
-  position: absolute; top: 42px; right: 8px;
+  position: absolute; left: 50%; top: 50%;
+  transform: translate(-50%, -50%);   /* 居中锚定：resize 时宽高对称扩展，右下角手柄跟随鼠标 */
   width: 380px; max-width: calc(100% - 16px);
   max-height: calc(100% - 52px);
   display: flex; flex-direction: column;

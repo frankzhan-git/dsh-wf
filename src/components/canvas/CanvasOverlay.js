@@ -39,10 +39,11 @@ export function CanvasOverlay(props) {
   const moveFloatResize = (ev) => {
     const d = floatResizeRef.current
     if (!d) return
-    // 最小尺寸 = 拖拽起点（当前大小）
+    // 面板居中锚定（translate(-50%,-50%)）：宽/高按鼠标位移量双倍增长（左右/上下对称各一半），
+    // 右下角手柄跟随鼠标；最小尺寸 = 拖拽起点（当前大小）
     setFloatSize({
-      w: Math.max(d.startW, d.startW + (ev.clientX - d.startX)),
-      h: Math.max(d.startH, d.startH + (ev.clientY - d.startY)),
+      w: Math.max(d.startW, d.startW + (ev.clientX - d.startX) * 2),
+      h: Math.max(d.startH, d.startH + (ev.clientY - d.startY) * 2),
     })
   }
   const endFloatResize = () => { floatResizeRef.current = null }
