@@ -174,7 +174,12 @@ export function updateDrag(ctx, drag, x, y, clientX, clientY) {
   if (drag.mode === 'move') return computeMove(ctx, drag, x, y)
   if (drag.mode === 'marquee') return { nextDrag: Object.assign({}, drag, { mq: computeMarquee(drag, x, y) }) }
   if (drag.mode === 'groupResize') return { patches: computeGroupResize(ctx, drag, x, y) }
-  if (drag.mode === 'groupEdgeResize') return { patches: computeGroupEdgeResize(ctx, drag, x, y) }
+  if (drag.mode === 'groupEdgeResize') {
+    const patches = computeGroupEdgeResize(ctx, drag, x, y)
+    // 记录本帧累计位移（多帧拖动增量：computeGroupEdgeResize 用 lastDx/lastDy 计算每帧增量，
+    // 避免 elements 每帧更新后把累计位移重复累加导致「放大」）
+    return { patches, lastDx: x - drag.sx, lastDy: y - drag.sy }
+  }
   if (drag.mode === 'resize') {
     // resize 附带对齐吸附：patch 与吸附虚线分开返回（与 move 一致）
     const r = computeResize(ctx, drag, x, y)
@@ -356,15 +361,17 @@ export function computeGroupResize(ctx, drag, x, y) {
 }
 
 // 多选外框边批量调整（横向/纵向）：移动边一侧的控件边缘跟随移动量，对侧不动（线性，非等比）
-//  - r：右边移动 dx → 每个控件 w += dx（左边缘不动）
-//  - l：左边移动 dx → 每个控件 x += dx 且 w -= dx（右边缘不动）
-//  - b：下边移动 dy → 每个控件 h += dy
-//  - t：上边移动 dy → 每个控件 y += dy 且 h -= dy
+//  - r：右边移动 → 每个控件宽 + 本帧增量（左边缘不动）
+//  - l：左边移动 → 每个控件 x += 本帧增量 且 w -= 本帧增量（右边缘不动）
+//  - b：下边移动 → 每个控件高 + 本帧增量
+//  - t：上边移动 → 每个控件 y += 本帧增量 且 h -= 本帧增量（下边缘不动）
+// 增量语义：dx/dy 为本帧位移（累计位移 - lastDx/lastDy）；拖动中 elements 每帧更新，
+// 若用累计位移加到当前值会重复累加导致「放大」（与 computeMove 多帧修复同款）
 // 钳制：每控件按类型最小尺寸（钳制时该控件幅度不足满量，属必要保护）
 export function computeGroupEdgeResize(ctx, drag, x, y) {
   const side = drag.side
-  const dx = side === 'l' || side === 'r' ? x - drag.sx : 0
-  const dy = side === 't' || side === 'b' ? y - drag.sy : 0
+  const dx = side === 'l' || side === 'r' ? (x - drag.sx) - (drag.lastDx || 0) : 0
+  const dy = side === 't' || side === 'b' ? (y - drag.sy) - (drag.lastDy || 0) : 0
   const idSet = new Set(ctx.selectedIds)
   const patches = []
   for (const e of ctx.elements) {

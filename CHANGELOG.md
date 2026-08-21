@@ -1,5 +1,14 @@
 # 更新日志
 
+## v2.2.2（2026）
+
+### 修正：批量调整幅度与光标
+
+- **修复批量调整「放大」**：多选外框边拖动时每个控件的调整量改按**本帧位移**计算（累计位移 - lastDx/lastDy）——此前拖动中 elements 每帧更新后累计位移被重复累加（旧 bug 同 computeMove 曾修复的多帧重复累加）；新增多帧回归测试（第 2 帧只加本帧增量，110+10=120 而非 130）
+- **四边光标修复**：`.wf-edge` 移除 `pointer-events: none`——此前 CSS cursor 在 pointer-events:none 元素上不生效（事件穿透时光标由下层决定），上下边现在显示 `ns-resize`（上下箭头）、左右边显示 `ew-resize`（左右箭头）
+- draw 模式四边手柄光标统一为 crosshair；空格平移模式覆盖为 grab/grabbing
+- 验证：verify-interactions **104 断言全绿**（新增多帧增量回归 2 条）
+
 ## v2.2.1（2026）
 
 ### 修正：四边 resize 语义与可用性

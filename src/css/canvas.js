@@ -24,7 +24,8 @@ export const CANVAS_CSS = `
 .wf-canvas-draw .wf-rect,
 .wf-canvas-draw .wf-note,
 .wf-canvas-draw .wf-text-el,
-.wf-canvas-draw .wf-arrow { cursor: crosshair !important; }
+.wf-canvas-draw .wf-arrow,
+.wf-canvas-draw .wf-edge { cursor: crosshair !important; }
 /* 空格按住（空间平移）：无论模式、无论鼠标在画布还是控件上，一律手型光标；
    拖拽中（pan）显示抓握态。!important 覆盖 draw 模式 crosshair 与控件 move */
 .wf-canvas-space .wf-rect,
@@ -105,8 +106,9 @@ export const CANVAS_CSS = `
 .wf-arrow.wf-selected { stroke: var(--wf-accent); stroke-width: 2; }
 .wf-rect-text { fill: var(--wf-text-2); font-size: 12px; pointer-events: none; }
 .wf-handle { fill: var(--wf-accent); stroke: var(--wf-bg-sunken); stroke-width: 1.2; cursor: nwse-resize; }
-/* 四边 resize 手柄（上下左右横向/纵向；视觉指示，命中判定在状态机几何层，无需 pointer 事件） */
-.wf-edge { fill: color-mix(in srgb, var(--wf-accent) 16%, transparent); pointer-events: none; }
+/* 四边 resize 手柄（上下左右横向/纵向）：命中判定在状态机几何层；
+   pointer-events 必须保留（默认）——否则 CSS cursor 不生效（事件穿透时光标由下层决定） */
+.wf-edge { fill: color-mix(in srgb, var(--wf-accent) 16%, transparent); }
 .wf-edge-ew { cursor: ew-resize; }
 .wf-edge-ns { cursor: ns-resize; }
 /* 拖动对齐虚线（吸附指示） */

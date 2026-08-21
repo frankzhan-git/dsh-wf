@@ -417,6 +417,20 @@ section('多选外框四边 resize：computeGroupEdgeResize')
   const r5 = computeGroupEdgeResize({ elements: els, selectedIds: ids }, { mode: 'groupEdgeResize', side: 'l', sx: gb.x, sy: gb.y, gb }, gb.x + 300, gb.y)
   const a5 = r5.find((p) => p.id === els[0].id)
   ok(a5.w === 24 && a5.x === 176, 'l：最小尺寸钳制（A 宽 24，右边缘 200 不动）')
+
+  // 多帧回归（修复「放大」）：拖动中 elements 每帧更新，增量必须按本帧位移计算，
+  // 否则累计位移重复累加（旧 bug：第 2 帧 w = 110 + 20 = 130，应为 120）
+  const elsF = [mk(100, 100, 100, 60), mk(250, 100, 100, 60)]
+  const idsF = elsF.map((e) => e.id)
+  const gbF = groupBounds(elsF, idsF)
+  const dragF = { mode: 'groupEdgeResize', side: 'r', sx: gbF.x + gbF.w, sy: gbF.y, gb: gbF }
+  const f1 = computeGroupEdgeResize({ elements: elsF, selectedIds: idsF }, dragF, gbF.x + gbF.w + 10, gbF.y)          // 第 1 帧：+10
+  const elsF2 = elsF.map((e) => { const p = f1.find((x) => x.id === e.id); return p ? Object.assign({}, e, p) : e })
+  const f2 = computeGroupEdgeResize({ elements: elsF2, selectedIds: idsF }, Object.assign({}, dragF, { lastDx: 10 }), gbF.x + gbF.w + 20, gbF.y)  // 第 2 帧：累计 +20
+  const aF1 = f1.find((p) => p.id === elsF[0].id)
+  const aF2 = f2.find((p) => p.id === elsF[0].id)
+  ok(aF1.w === 110, '多帧：第 1 帧宽 +10（110）')
+  ok(aF2.w === 120, '多帧：第 2 帧只加本帧增量（110+10=120，不重复累加成 130）')
 }
 
 // ---------- 多选外框边手柄命中决策 ----------
