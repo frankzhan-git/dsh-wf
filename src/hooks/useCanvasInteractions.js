@@ -1,7 +1,7 @@
 // 画布交互（P1 应用层）：指针 / 键盘 / 滚轮事件 → core/interactions 纯函数 → 副作用执行
 // 状态机范式（P3）：决策/计算/结算全在纯函数层，本 hook 只做事件适配与命令执行
 import React from 'react'
-import { cloneElements } from '../core/model.js'
+import { cloneElements, CANVAS_W, CANVAS_H } from '../core/model.js'
 import {
   decidePointerDown, updateDrag, settleDrag, zoomAt, toLocal,
   MAX_ELEMENTS, PASTE_OFFSET, collectCopySet, buildPaste,
@@ -208,17 +208,30 @@ export function useCanvasInteractions(deps) {
     }
   })
 
-  // ---------- 滚轮缩放（原生监听以支持 preventDefault）；中心锚点缩放 ----------
+  // ---------- 滚轮（原生监听以支持 preventDefault） ----------
+  // 普通滚轮 = 画布上下滚动（同滚动条效果；Shift+滚轮 = 水平滚动）；
+  // Ctrl/⌘ + 滚轮 = 中心锚点缩放（原滚轮行为）
   React.useEffect(() => {
     if (!open) return
     const view = viewRef.current
     if (!view) return
     const onWheel = (ev) => {
       ev.preventDefault()
-      const factor = ev.deltaY < 0 ? 1.1 : 1 / 1.1
-      const r = zoomAt(factor, zoom, pan)
-      setZoom(r.zoom)
-      setPan(r.pan)
+      if (ev.ctrlKey || ev.metaKey) {
+        const factor = ev.deltaY < 0 ? 1.1 : 1 / 1.1
+        const r = zoomAt(factor, zoom, pan)
+        setZoom(r.zoom)
+        setPan(r.pan)
+        return
+      }
+      // 画布滚动：滚轮增量（像素/行归一化）→ 逻辑坐标换算 → 平移画布
+      // 方向与滚动条一致：滚轮向下（deltaY>0）→ 内容上移（pan.y 增大）
+      const rect = view.getBoundingClientRect()
+      const scale = Math.min(rect.width / (CANVAS_W / zoom), rect.height / (CANVAS_H / zoom))
+      const factor = ev.deltaMode === 1 ? 16 : (ev.deltaMode === 2 ? rect.height : 1)
+      const dx = (ev.shiftKey ? ev.deltaY : ev.deltaX) * factor / scale
+      const dy = (ev.shiftKey ? 0 : ev.deltaY) * factor / scale
+      setPan((p) => ({ x: p.x + dx, y: p.y + dy }))
     }
     view.addEventListener('wheel', onWheel, { passive: false })
     return () => view.removeEventListener('wheel', onWheel)

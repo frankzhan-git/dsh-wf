@@ -260,7 +260,8 @@ export const CANVAS_CSS = `
 .wf-float-panel {
   position: absolute; left: 50%; top: 50%;
   transform: translate(-50%, -50%);   /* 居中锚定：resize 时宽高对称扩展，右下角手柄跟随鼠标 */
-  width: 380px; max-width: calc(100% - 16px);
+  width: 380px; height: 380px;        /* 默认尺寸（内容区撑满的基础；可右下角拖拽调整，最小=拖拽起点） */
+  max-width: calc(100% - 16px);
   max-height: calc(100% - 52px);
   display: flex; flex-direction: column;
   background: var(--wf-bg-raised);
@@ -297,7 +298,7 @@ export const CANVAS_CSS = `
   border-color: color-mix(in srgb, var(--dsw-alias-state-success-primary, #3fb950) 45%, transparent);
 }
 .wf-float-panel .wf-jsonl {
-  flex: 1 1 0%; min-height: 0; max-height: 320px;
+  flex: 1 1 0%; min-height: 0;        /* 撑满面板剩余空间（面板默认/拖拽高度） */
   margin: 8px; overflow: auto;
   background: var(--wf-bg-sunken);
   border: 1px solid var(--wf-border); border-radius: 8px;
