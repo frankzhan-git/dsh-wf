@@ -5,11 +5,16 @@
 
 import { CANVAS_W, CANVAS_H } from './model.js'
 import { hitTest, createElement } from './model.js'
+import { cloneElements, nextId } from './model.js'
+import { contains } from './infer.js'
+import { minSizeOf } from './types.js'
 
 export const ZOOM_MIN = 0.25
 export const ZOOM_MAX = 3
 export const MAX_ELEMENTS = 300
 export const PAGE_GAP = 16
+// 粘贴偏移：新副本相对复制源的小幅横纵位移（避免与原控件重叠）
+export const PASTE_OFFSET = 24
 
 // ---------- 几何 ----------
 
@@ -142,7 +147,13 @@ export function updateDrag(ctx, drag, x, y, clientX, clientY) {
   if (drag.mode === 'move') return computeMove(ctx, drag, x, y)
   if (drag.mode === 'marquee') return { nextDrag: Object.assign({}, drag, { mq: computeMarquee(drag, x, y) }) }
   if (drag.mode === 'groupResize') return { patches: computeGroupResize(ctx, drag, x, y) }
-  if (drag.mode === 'resize') return { patch: computeResize(ctx, drag, x, y) }
+  if (drag.mode === 'resize') {
+    // resize 附带对齐吸附：patch 与吸附虚线分开返回（与 move 一致）
+    const r = computeResize(ctx, drag, x, y)
+    if (!r) return {}
+    const { snaps, ...patch } = r
+    return { patch, snaps }
+  }
   return {}
 }
 
@@ -290,7 +301,7 @@ export function computeMarquee(drag, x, y) {
   return { x: Math.min(x, drag.sx), y: Math.min(y, drag.sy), w: Math.abs(x - drag.sx), h: Math.abs(y - drag.sy) }
 }
 
-// 多选外框等比缩放：锚定对角，scale 统一（保持外框宽高比）
+// 多选外框等比缩放：锚定对角，scale 统一（保持外框宽高比）；各元素按自身类型最小尺寸钳制
 export function computeGroupResize(ctx, drag, x, y) {
   const gb = drag.gb
   let nw = gb.w
@@ -304,28 +315,55 @@ export function computeGroupResize(ctx, drag, x, y) {
   const patches = []
   for (const e of ctx.elements) {
     if (!idSet.has(e.id)) continue
+    const min = minSizeOf(ctx.elements, e)
     patches.push({
       id: e.id,
       x: gb.x + (e.x - gb.x) * scale,
       y: gb.y + (e.y - gb.y) * scale,
-      w: Math.max(4, e.w * scale),
-      h: Math.max(4, e.h * scale),
+      w: Math.max(min.w, e.w * scale),
+      h: Math.max(min.h, e.h * scale),
     })
   }
   return patches
 }
 
-// 改尺寸：最小 8 + 页面边界钳制
+// 改尺寸（右下角手柄）：按类型最小尺寸 + 下边/右边对齐吸附（阈值与移动一致 6/zoom）+ 页面边界钳制
+// 吸附目标：其它控件边缘 + 所属页面边界；仅吸附正在移动的右/下边缘（左/上为锚点不动）
 export function computeResize(ctx, drag, x, y) {
   const el = ctx.elements.find((e) => e.id === drag.id)
   if (!el) return null
-  let w = Math.max(8, drag.ow + x - drag.sx)
-  let h = Math.max(8, drag.oh + y - drag.sy)
+  const { zoom, elements } = ctx
+  const min = minSizeOf(elements, el)
+  let w = Math.max(min.w, drag.ow + x - drag.sx)
+  let h = Math.max(min.h, drag.oh + y - drag.sy)
+  const tol = 6 / zoom
+  const snaps = []
+  const targets = elements.filter((t) => t.id !== el.id && t.kind !== 'arrow')
+  if (drag.page) targets.push(drag.page)
+  // 右边（右边缘 = el.x + w）→ 吸附到目标左/右边缘
+  const rightX = el.x + w
+  let bw = null
+  for (const t of targets) {
+    for (const [d, pos] of [[Math.abs(rightX - t.x), t.x], [Math.abs(rightX - (t.x + t.w)), t.x + t.w]]) {
+      if (d < tol && (!bw || d < bw.d)) bw = { d, pos }
+    }
+  }
+  if (bw) { w = Math.max(min.w, bw.pos - el.x); snaps.push({ axis: 'v', pos: bw.pos }) }
+  // 下边（下边缘 = el.y + h）→ 吸附到目标上/下边缘
+  const bottomY = el.y + h
+  let bh = null
+  for (const t of targets) {
+    for (const [d, pos] of [[Math.abs(bottomY - t.y), t.y], [Math.abs(bottomY - (t.y + t.h)), t.y + t.h]]) {
+      if (d < tol && (!bh || d < bh.d)) bh = { d, pos }
+    }
+  }
+  if (bh) { h = Math.max(min.h, bh.pos - el.y); snaps.push({ axis: 'h', pos: bh.pos }) }
+  // 页面边界钳制（吸附之后执行，与移动一致：贴边优先）
   if (drag.page) {
     w = Math.min(w, drag.page.x + drag.page.w - el.x)
     h = Math.min(h, drag.page.y + drag.page.h - el.y)
   }
-  return { w, h }
+  return { w, h, snaps }
 }
 
 // ---------- pointer.up / leave 结算 ----------
@@ -361,4 +399,34 @@ export function settleDrag(ctx, drag) {
     return { commit: true }
   }
   return {}
+}
+
+// ---------- 复制 / 粘贴（剪贴板，纯函数） ----------
+// 复制集合 = 选中元素 + 其内部所有子元素（容器/页面连带复制，语义嵌套规则与 JSONL 树一致）；
+// 去重（选中父元素时其子元素只出现一次），保持画布数组顺序（z 序不变），返回深拷贝副本
+export function collectCopySet(elements, ids) {
+  const selEls = []
+  for (const id of ids) {
+    const e = elements.find((x) => x.id === id)
+    if (e) selEls.push(e)
+  }
+  const picked = new Map() // id → 元素（保序去重）
+  for (const e of elements) {
+    const inSet = selEls.some((p) => p.id === e.id || contains(p, e))
+    if (inSet) picked.set(e.id, e)
+  }
+  return cloneElements([...picked.values()])
+}
+
+// 粘贴副本：深拷贝 + 重新分配 id + 整体偏移 (dx, dy)。
+// 集合内所有元素使用同一位移 → 子元素与容器/页面的相对位置与复制源完全一致；
+// 所有字段（类型/样式/设置/文本/备注）经 JSON 深拷贝逐项保留
+export function buildPaste(copySet, dx, dy) {
+  return copySet.map((e) => {
+    const c = cloneElements([e])[0]
+    c.id = nextId()
+    c.x += dx
+    c.y += dy
+    return c
+  })
 }

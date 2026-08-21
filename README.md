@@ -4,8 +4,8 @@
 >
 > 让模型精确理解你想要的界面，而不是用文字反复描述、反复猜。
 
-[![v1.0.0](https://img.shields.io/badge/version-1.0.0-2f6feb)](https://github.com/frankzhan-git/dsh-wf)
-[![9 套验证全绿](https://img.shields.io/badge/verify-9%20suites%20%E2%9C%93-2ea043)]()
+[![v1.1.0](https://img.shields.io/badge/version-1.1.0-2f6feb)](https://github.com/frankzhan-git/dsh-wf)
+[![10 套验证全绿](https://img.shields.io/badge/verify-10%20suites%20%E2%9C%93-2ea043)]()
 
 dsh-wf 是 [DeepSeek Harness](https://github.com/deepseek-ai) 的正式插件：在会话输入框的工具行点「草图」按钮唤起轻量画板，绘制界面布局后一键生成 **JSONL 语义描述**，嵌入输入框随你的文字需求一起发给 agent——结构、层级、比例、要求全部精确传达，无需多轮澄清。
 
@@ -13,13 +13,14 @@ dsh-wf 是 [DeepSeek Harness](https://github.com/deepseek-ai) 的正式插件：
 
 ## ✨ 特性
 
-- **轻量画板**：双模式（选择 / 控件，`V` 切换）、无限画布（平移 / 缩放）、对齐吸附、多选批量操作、等比缩放
+- **轻量画板**：双模式（选择 / 绘制，长按 `Alt` 临时绘制）、无限画布（平移 / 缩放）、对齐吸附、多选批量操作、等比缩放
 - **页面（多设计稿）**：一个画布可含多个页面，每个页面 = JSONL 的一行根，独立输出
 - **JSONL 一等公民**：输出遵循《UI布局语义描述标准》——纯净七字段、空值省略、只表达结构语义，不输出坐标/尺寸/样式
 - **语义预览**：画布内实时预览解析出的 JSON 与控件树，解析不对立刻可见
 - **画布文档管理**：自动保存（增量写入）、最近打开、重命名、删除（二次确认）、导出 / 导入备份
 - **宿主存储**：数据落盘为可读可 git 的 JSON 文件库（`~/Documents/界面草图/`），浏览器存储自动降级
-- **注册表驱动**：18 种控件类型、17 个 JSONL 字段全部注册表化，新增类型不改业务逻辑
+- **注册表驱动**：18 种控件类型、6 个 JSONL 结构字段全部注册表化，新增类型不改业务逻辑
+- **结构陈述而非高保真**：JSONL 只表达结构与内容（文字/占位/输入类型/选项/动作/选中态）；资源地址、尺寸、播放行为、默认值、进度等运行态与实现细节一律走 `description`，由模型结合上下文实现
 
 ---
 
@@ -56,7 +57,7 @@ dsh-wf 的思路：**人画图 → 插件转 JSONL → 模型推理**。JSONL �
 | 范式 | 含义 |
 | --- | --- |
 | P1 分层领域 | core（纯逻辑，零 React/DSH）/ hooks（状态编排）/ components（纯展示）/ css，依赖单向 |
-| P2 注册表驱动 | 18 控件类型 + 17 JSONL 字段全注册（含序列化规则内聚）；新增能力 = 注册，不改既有代码 |
+| P2 注册表驱动 | 18 控件类型 + 6 JSONL 结构字段全注册（含序列化规则内聚）；新增能力 = 注册，不改既有代码 |
 | P3 纯函数状态机 | 交互 = `decide → compute → settle` 纯函数，副作用经命令由 hooks 执行，行为可单测 |
 | P4 单一数据所有权 | elements 是唯一事实源；tree/jsonl/issues 全部纯函数派生 + memo |
 | P5 容错契约 | 解析/读取永不抛：逐行容错、损坏文件隔离（`.corrupt`）、索引损坏自动重建 |
@@ -139,8 +140,8 @@ dsh --profile web --dump-config | findstr dsh-wf
 
 | 操作 | 方式 |
 | --- | --- |
-| 切换模式（选择 / 控件） | `V` 键，或点画布左上角模式徽标 |
-| 绘制 | 控件模式：画布空白处拖拽 = 新建页面；页面内拖拽 = 新建容器 |
+| 切换模式（选择 / 绘制） | 长按 `Alt` 临时进入绘制模式（松开恢复选择），或点画布左上角模式徽标 |
+| 绘制 | 绘制模式：画布空白处拖拽 = 新建页面；页面内拖拽 = 新建容器 |
 | 移动 / 改尺寸 | 选择模式点击拖动；右下角手柄改尺寸 |
 | 平移画布 | 按住空格 + 拖动 |
 | 缩放 | 滚轮（视口中心锚定） |
@@ -158,7 +159,7 @@ dsh --profile web --dump-config | findstr dsh-wf
 
 页面 · 容器 · 文本 · 按钮 · 输入框 · 文本域 · 图片 · 视频 · 音频 · 图标 · 链接 · 下拉选择 · 复选框 · 单选框 · 开关 · 进度条 · 分割线 · 徽标
 
-- 控件模式下绘制矩形 → 在右侧属性面板或右键菜单中设置类型
+- 绘制模式下绘制矩形 → 在右侧属性面板或右键菜单中设置类型
 - 未设类型的矩形按**包含关系 + 文本启发式自动推断**（如圆角短文本 → 按钮、占位文本 → 输入框）
 - 嵌套规则：**容器可嵌套任意内容；非容器不可嵌套**（内部控件自动提升到父级）；**页面恒为根**且恒在底层
 
@@ -195,7 +196,7 @@ dsh-wf/
 │   ├── components/         # 表现层（画布 / 属性面板 / 文档管理 / 预览，全部纯展示）
 │   ├── i18n/               # 文案表（zh 默认，key 化预留多语言）
 │   └── css/                # 样式（--wf-* token）
-├── scripts/                # 构建 + 9 套验证脚本
+├── scripts/                # 构建 + 10 套验证脚本
 ├── schema.json             # JSONL 标准 Schema（与注册表一致性自动检查）
 └── ARCHITECTURE.md         # 完整架构蓝本（七范式 + 实施记录）
 ```
@@ -215,14 +216,15 @@ dsh-wf/
 ## 🧪 验证
 
 ```bash
-npm run verify   # 9 套脚本一键全绿（180+ 断言）
+npm run verify   # 10 套脚本一键全绿
 ```
 
 | 套件 | 覆盖 |
 | --- | --- |
 | verify-core | 解析管线行为（登录页/商品卡片/多页面/嵌套规则等 10 场景） |
-| verify-registry / serializer | 注册表完整性 / 17 类型 props / schema.json 一致性 |
-| verify-interactions | 交互状态机（决策/吸附/钳制/多帧增量跟随/结算） |
+| verify-registry / serializer | 注册表完整性 / 类型 props / schema.json 一致性 / 字段面板对齐 |
+| verify-interactions | 交互状态机（决策/吸附/钳制/多帧增量跟随/结算/resize 吸附） |
+| verify-newcanvas | 新建画布端到端管线（严格顺序/无幽灵画布/页面不丢失） |
 | verify-storage / host-storage | 存储往返 / 增量 patch / 迁移 / 损坏隔离 / 宿主文件库全流程 |
 | verify-adapter-contract | 四级适配器接口契约 |
 | verify-perf | 性能基线（300 元素管线 < 50ms） |
@@ -231,6 +233,7 @@ npm run verify   # 9 套脚本一键全绿（180+ 断言）
 
 ## 📄 文档
 
+- [CHANGELOG.md](CHANGELOG.md) — 版本更新记录
 - [ARCHITECTURE.md](ARCHITECTURE.md) — 完整架构蓝本（七范式 P1–P7、模块规格、S1–S6 实施记录）
 - [schema.json](schema.json) — JSONL 标准 Schema
 - [README 演进记录]() — 功能迭代历史（M2.x–M4.x）见仓库 docs 分支记录

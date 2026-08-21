@@ -4,6 +4,7 @@ import { createElement, cloneElements } from '../src/core/model.js'
 import {
   decidePointerDown, updateDrag, settleDrag, groupBounds, zoomAt,
   computeMove, computeGroupResize, computeCreate, computeResize, computeMarquee,
+  collectCopySet, buildPaste, PASTE_OFFSET,
 } from '../src/core/interactions.js'
 
 const ok = (cond, name) => { console.log((cond ? 'PASS' : 'FAIL') + ' ' + name); if (!cond) process.exitCode = 1 }
@@ -161,13 +162,39 @@ section('compute 与 settle')
   const c2 = computeCreate({ elements: els }, drag, 900, 900)
   ok(c2.x === 100 && c2.y === 100 && c2.w === 20 + 760 - 100 && c2.h === 20 + 480 - 100, '创建页面钳制：不超出页面右/下边界')
 
-  // resize：最小 8
+  // resize：按类型最小尺寸（注册表驱动，不再统一 8px）
   const el = mk(100, 100, 100, 50)
   const rDrag = { mode: 'resize', id: el.id, sx: 200, sy: 150, ow: 100, oh: 50, page: null }
   const r = computeResize({ elements: [el] }, rDrag, 150, 140)
   ok(r.w === 50 && r.h === 40, 'resize 计算新尺寸')
   const r2 = computeResize({ elements: [el] }, rDrag, 100, 100)
-  ok(r2.w === 8 && r2.h === 8, 'resize 最小 8')
+  ok(r2.w === 24 && r2.h === 16, 'resize 最小尺寸按类型（未显式类型 → 容器 24×16）')
+
+  // 各类型最小尺寸
+  const minOf = (type, x, y, w, h) => {
+    const e = mk(x, y, w, h, type)
+    return computeResize({ elements: [e] }, { mode: 'resize', id: e.id, sx: x + w, sy: y + h, ow: w, oh: h, page: null }, x, y)
+  }
+  const btn = minOf('button', 100, 100, 100, 50)
+  ok(btn.w === 40 && btn.h === 20, '按钮最小 40×20')
+  const ic = minOf('icon', 100, 100, 20, 20)
+  ok(ic.w === 16 && ic.h === 16, '图标最小 16×16')
+  const pg = minOf('page', 100, 100, 100, 50)
+  ok(pg.w === 32 && pg.h === 24, '页面最小 32×24')
+  const sw = minOf('switch', 100, 100, 100, 30)
+  ok(sw.w === 40 && sw.h === 20, '开关最小 40×20')
+  const div = minOf('divider', 100, 100, 100, 10)
+  ok(div.w === 16 && div.h === 8, '分割线最小 16×8')
+
+  // 组缩放：小元素按类型最小尺寸钳制（不再缩到 4px 不可选）
+  const els5 = [mk(100, 100, 10, 10, 'icon'), mk(200, 100, 100, 60, 'button')]
+  const ids5 = els5.map((e) => e.id)
+  const gb5 = groupBounds(els5, ids5)
+  const g5 = computeGroupResize({ elements: els5, selectedIds: ids5 }, { mode: 'groupResize', corner: 'tl', sx: gb5.x, sy: gb5.y, gb: gb5 }, gb5.x + 200, gb5.y + 120)
+  const iconPatch = g5.find((p) => p.id === els5[0].id)
+  const btnPatch = g5.find((p) => p.id === els5[1].id)
+  ok(iconPatch.w === 16 && iconPatch.h === 16, '组缩放按类型最小尺寸钳制（icon 16×16）')
+  ok(btnPatch.w === 40 && btnPatch.h === 20, '组缩放按类型最小尺寸钳制（button 40×20）')
 
   // marquee
   const m = computeMarquee({ sx: 100, sy: 100 }, 300, 250)
@@ -212,6 +239,60 @@ section('compute 与 settle')
   ok(z2.zoom === 0.25, 'zoom 下限 0.25')
 }
 
+// ---------- resize 对齐吸附（下边/右边，阈值 6/zoom 与移动一致） ----------
+section('resize 对齐吸附')
+{
+  // el(100,100,100,50)；target(300,100,60,30)：左边缘 300 / 右边缘 360 / 下边缘 130
+  const els = []
+  const re = mk(100, 100, 100, 50)
+  els.push(re)
+  const rt = mk(300, 100, 60, 30)
+  els.push(rt)
+  const rDrag = { mode: 'resize', id: re.id, sx: 200, sy: 150, ow: 100, oh: 50, page: null }
+
+  // 右边拖到与目标左边缘差 3px（容差内）→ 吸附到 300
+  const r1 = computeResize({ elements: els, zoom: 1 }, rDrag, 200 + 97, 150)
+  ok(r1.w === 200, 'resize 右边吸附到目标左边缘（300）')
+  ok(r1.snaps.some((s) => s.axis === 'v' && s.pos === 300), 'resize 产生垂直吸附线')
+
+  // 右边拖到与目标右边缘差 3px → 吸附到 360
+  const r2 = computeResize({ elements: els, zoom: 1 }, rDrag, 200 + 157, 150)
+  ok(r2.w === 260, 'resize 右边吸附到目标右边缘（360）')
+
+  // 右边距目标 7px（超出容差）→ 不吸附
+  const r3 = computeResize({ elements: els, zoom: 1 }, rDrag, 200 + 93, 150)
+  ok(r3.w === 193 && r3.snaps.length === 0, 'resize 超出容差不吸附')
+
+  // 下边拖到与目标下边缘差 3px → 吸附到 130
+  const r4 = computeResize({ elements: els, zoom: 1 }, rDrag, 200, 150 + (27 - 50))
+  ok(r4.h === 30, 'resize 下边吸附到目标下边缘（130）')
+  ok(r4.snaps.some((s) => s.axis === 'h' && s.pos === 130), 'resize 产生水平吸附线')
+
+  // 下边吸附到目标上边缘：元素 y=50，下边拖到 97（距目标上边 3px）→ 吸附到 100
+  const els3 = []
+  const re3 = mk(100, 50, 100, 50)
+  els3.push(re3)
+  const rt3 = mk(300, 100, 60, 30)
+  els3.push(rt3)
+  const rDrag3 = { mode: 'resize', id: re3.id, sx: 200, sy: 100, ow: 100, oh: 50, page: null }
+  const r5 = computeResize({ elements: els3, zoom: 1 }, rDrag3, 200, 100 + (47 - 50))
+  ok(r5.h === 50 && r5.snaps.some((s) => s.axis === 'h' && s.pos === 100), 'resize 下边吸附到目标上边缘（100）')
+
+  // updateDrag：resize 路径拆分 patch 与 snaps
+  const u1 = updateDrag({ elements: els, zoom: 1, selectedIds: [re.id] }, rDrag, 200 + 97, 150, 200 + 97, 150)
+  ok(u1.patch && u1.patch.w === 200 && u1.snaps.length === 1, 'updateDrag：resize 返回 { patch, snaps }')
+
+  // 页面钳制仍生效：页面右边界内拖拽超出 → 贴边
+  const els2 = []
+  const p2 = createElement({ kind: 'rect', type: 'page' }, 20, 20, 300, 200)
+  els2.push(p2)
+  const re2 = mk(100, 100, 100, 50)
+  els2.push(re2)
+  const rDrag2 = { mode: 'resize', id: re2.id, sx: 200, sy: 150, ow: 100, oh: 50, page: { x: 20, y: 20, w: 300, h: 200 } }
+  const r6 = computeResize({ elements: els2, zoom: 1 }, rDrag2, 600, 500)
+  ok(r6.w === 20 + 300 - 100 && r6.h === 20 + 200 - 100, 'resize 页面边界钳制（贴边）')
+}
+
 // ---------- 完整事件序列（决策→移动→结算） ----------
 section('事件序列：框选全流程')
 {
@@ -227,4 +308,72 @@ section('事件序列：框选全流程')
   ok(m1.nextDrag.mq.w === 320 && m1.nextDrag.mq.h === 270, '序列：移动更新选框')
   const s = settleDrag({ elements: els }, m1.nextDrag)
   ok(s.selection.length === 2 && s.selection.includes(a.id) && s.selection.includes(b.id), '序列：结算选中两个完全包含元素')
+}
+
+// ---------- 复制 / 粘贴 ----------
+section('复制 / 粘贴')
+{
+  // 场景：页面 + 页面内容器（含子按钮）+ 页面外独立按钮 + 备注
+  const els = []
+  const page = createElement({ kind: 'rect', type: 'page' }, 20, 20, 760, 480)
+  page.name = '登录页'
+  els.push(page)
+  const cont = mk(60, 60, 300, 200, 'container')
+  cont.name = '表单'
+  els.push(cont)
+  const kidBtn = mk(80, 80, 120, 36, 'button')
+  kidBtn.text = '登录'
+  kidBtn.action = '提交登录'
+  kidBtn.radius = 6
+  kidBtn.note = '主按钮'
+  els.push(kidBtn)
+  const outBtn = mk(500, 500, 100, 32, 'button')
+  outBtn.text = '页外'
+  els.push(outBtn)
+  const note = createElement({ kind: 'note' }, 820, 60, 140, 60) // 页面（右界 780）之外
+  note.text = '备注：要求'
+  els.push(note)
+
+  // 1) 复制页面 → 页面 + 内部容器 + 子按钮（页外按钮/备注不进入）
+  const set1 = collectCopySet(els, [page.id])
+  ok(set1.length === 3, '复制页面：连带内部容器与子按钮（3 个）')
+  ok(set1.every((e) => e.id !== outBtn.id && e.id !== note.id), '复制页面：不含页外元素')
+  ok(set1[0].id === page.id, '复制集合保持画布 z 序（页面在前）')
+
+  // 2) 复制容器 → 容器 + 子按钮（样式/设置逐项保留）
+  const set2 = collectCopySet(els, [cont.id])
+  ok(set2.length === 2, '复制容器：连带内部子元素（2 个）')
+  const kid = set2.find((e) => e.text === '登录')
+  ok(kid && kid.action === '提交登录' && kid.radius === 6 && kid.note === '主按钮', '副本样式/设置与源完全一致')
+
+  // 3) 多选（父+子同时选中）→ 去重不重复
+  const set3 = collectCopySet(els, [page.id, cont.id, kidBtn.id])
+  ok(set3.length === 3, '父+子同时选中：去重后仍 3 个')
+
+  // 4) 多选互不包含 → 各取所需
+  const set4 = collectCopySet(els, [kidBtn.id, outBtn.id])
+  ok(set4.length === 2, '多选互不包含：复制 2 个')
+
+  // 5) 深拷贝隔离：复制后修改源，缓冲不受影响
+  const set5 = collectCopySet(els, [cont.id])
+  kidBtn.text = '改过'
+  const kid5 = set5.find((e) => e.text === '登录')
+  ok(!!kid5, '复制缓冲为深拷贝（源修改不影响缓冲）')
+
+  // 6) 粘贴：新 id + 整体偏移 + 相对位置保持
+  const copies = buildPaste(set1, PASTE_OFFSET, PASTE_OFFSET)
+  ok(copies.length === 3 && new Set(copies.map((c) => c.id)).size === 3, '粘贴：全部重新分配 id（无重复）')
+  ok(copies.every((c) => !els.some((e) => e.id === c.id)), '粘贴：id 不与源冲突')
+  const cPage = copies.find((c) => c.type === 'page')
+  const cCont = copies.find((c) => c.type === 'container')
+  const cKid = copies.find((c) => c.text === '登录')
+  ok(cPage.x === page.x + PASTE_OFFSET && cPage.y === page.y + PASTE_OFFSET, '粘贴：页面小幅横纵位移')
+  ok(cCont.x === cont.x + PASTE_OFFSET && cCont.y === cont.y + PASTE_OFFSET, '粘贴：容器同位移')
+  ok(cKid.x === kidBtn.x + PASTE_OFFSET && cKid.y === kidBtn.y + PASTE_OFFSET, '粘贴：子元素同位移')
+  ok(cKid.x - cCont.x === kidBtn.x - cont.x && cKid.y - cCont.y === kidBtn.y - cont.y, '粘贴：子元素与容器相对位置与源一致')
+  ok(cKid.action === '提交登录' && cKid.radius === 6 && cKid.note === '主按钮', '粘贴：样式/设置与源完全一致')
+  ok(copies[0].id === cPage.id, '粘贴：保持 z 序')
+
+  // 7) 空选择复制 → 空集合
+  ok(collectCopySet(els, []).length === 0, '空选择复制 → 空集合')
 }

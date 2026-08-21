@@ -1,6 +1,6 @@
 // 验证脚本：注册表完整性（P2）
 // 用法：node scripts/verify-registry.mjs
-import { TYPE_REGISTRY, TYPE_BY_TYPE, ALL_TYPES, TYPE_LABEL, isContainerType, canBeParent, typeOptionsFor } from '../src/core/types.js'
+import { TYPE_REGISTRY, TYPE_BY_TYPE, ALL_TYPES, TYPE_LABEL, isContainerType, canBeParent, typeOptionsFor, minSizeOf } from '../src/core/types.js'
 import { PROPS_REGISTRY, PROPS_BY_KEY } from '../src/core/jsonl/props.js'
 import { serializeProps } from '../src/core/jsonl/serializer.js'
 import { validateTree, validateJsonl } from '../src/core/jsonl/validator.js'
@@ -17,17 +17,64 @@ ok(new Set(ALL_TYPES).size === 18, '类型无重复')
 ok(TYPE_REGISTRY.every((t) => t.label && typeof t.label === 'string'), '每个类型有中文标签')
 ok(TYPE_REGISTRY.every((t) => Array.isArray(t.propsSchema)), '每个类型有 propsSchema')
 ok(TYPE_REGISTRY.every((t) => t.render && t.preview), '每个类型有 render/preview 分派键')
+ok(TYPE_REGISTRY.every((t) => Array.isArray(t.fields)), '每个类型有 fields 配置（面板字段清单）')
 ok(Object.keys(TYPE_BY_TYPE).length === 18, 'TYPE_BY_TYPE 索引完整')
+
+// 面板字段清单（fields）与 propsSchema 双向对齐：无「显示了却不输出」，也无「输出了却不可配」
+{
+  const schemaKeysOf = (t) => t.propsSchema.map((k) => (typeof k === 'string' ? k : k.key))
+  const alias = { valueNum: 'value', srcV: 'src', srcA: 'src' } // 面板显示键 → props 键
+  const bad = []
+  for (const t of TYPE_REGISTRY) {
+    const schema = schemaKeysOf(t)
+    for (const f of t.fields) {
+      const real = alias[f] || f
+      if (!schema.includes(real)) bad.push(`${t.type}.${f}`)
+    }
+  }
+  ok(bad.length === 0, `fields 全部映射到 propsSchema（${bad.length ? bad.join(',') : '无缺失'}）`)
+  const TEXT_KEYS = ['text', 'placeholder'] // 面板文本类分支渲染，无需在 fields 列出
+  const shownBy = { value: ['valueNum'], src: ['srcV', 'srcA'] } // props 键 → 面板显示键（一对多）
+  const bad2 = []
+  for (const t of TYPE_REGISTRY) {
+    const schema = schemaKeysOf(t)
+    for (const k of schema) {
+      if (TEXT_KEYS.includes(k)) continue
+      const shown = t.fields.includes(k) || (shownBy[k] || []).some((fk) => t.fields.includes(fk))
+      if (!shown) bad2.push(`${t.type}.${k}`)
+    }
+  }
+  ok(bad2.length === 0, `propsSchema 字段均在面板可见（${bad2.length ? bad2.join(',') : '无遗漏'}）`)
+}
+
+// value 字段已移除（运行态/进度细节走 description）
+ok(!PROPS_BY_KEY.value, 'value 字段已移除（进度是运行态，非结构）')
 
 // 注册表与现有手写 TYPE_LABEL 一致（标签派生化，无手写表）
 ok(JSON.stringify(TYPE_LABEL) === JSON.stringify(OLD_TYPE_LABEL), 'TYPE_LABEL 与旧手写表逐项一致')
 
+// ---------- 最小尺寸（画布 resize/组缩放钳制基准） ----------
+section('最小尺寸')
+ok(TYPE_REGISTRY.every((t) => Number.isFinite(t.minW) && Number.isFinite(t.minH) && t.minW > 0 && t.minH > 0), '每个类型有最小尺寸（minW/minH）')
+{
+  const btn = createElement({ kind: 'rect', type: 'button' }, 0, 0, 100, 40)
+  ok(minSizeOf([btn], btn).w === 40 && minSizeOf([btn], btn).h === 20, 'button 最小 40×20')
+  const auto = createElement({ kind: 'rect' }, 0, 0, 100, 40)
+  ok(minSizeOf([auto], auto).w === 24 && minSizeOf([auto], auto).h === 16, '未显式类型矩形按容器 24×16')
+  const note = createElement({ kind: 'note' }, 0, 0, 100, 40)
+  ok(minSizeOf([note], note).w === 40 && minSizeOf([note], note).h === 24, 'note 最小 40×24')
+  const prog = createElement({ kind: 'rect', type: 'progress' }, 0, 0, 100, 10)
+  ok(minSizeOf([prog], prog).w === 40 && minSizeOf([prog], prog).h === 12, 'progress 最小 40×12')
+}
+
 // ---------- 字段注册表完整性 ----------
 section('字段注册表')
-ok(PROPS_REGISTRY.length === 17, '17 个 JSONL 字段')
-ok(new Set(PROPS_REGISTRY.map((p) => p.key)).size === 17, '字段 key 无重复')
+ok(PROPS_REGISTRY.length === 6, '6 个 JSONL 结构字段（文字/占位/输入类型/选项/动作/选中态）')
+ok(new Set(PROPS_REGISTRY.map((p) => p.key)).size === 6, '字段 key 无重复')
 ok(PROPS_REGISTRY.every((p) => typeof p.serialize === 'function'), '每个字段有序列化函数')
 ok(PROPS_REGISTRY.filter((p) => p.type === 'enum').every((p) => Array.isArray(p.values) && p.values.length), 'enum 字段有合法值域')
+// 字段哲学：不含实现细节（资源/尺寸/播放/默认值/进度/独立标签）——运行态与细节一律走 description
+ok(!PROPS_REGISTRY.some((p) => ['src', 'alt', 'href', 'poster', 'autoplay', 'controls', 'size', 'iconName', 'label', 'value', 'max'].includes(p.key)), '无实现细节/运行态字段（src/alt/href/poster/autoplay/controls/size/iconName/label/value/max）')
 
 // 每个类型的 propsSchema（含覆盖对象）key 都注册过
 {
@@ -96,27 +143,16 @@ section('typeOptionsFor')
 // ---------- 序列化规则（注册表驱动，含 per-type 覆盖） ----------
 section('序列化规则')
 {
-  const pv = createElement({ kind: 'rect' }, 0, 0, 100, 10)
-  pv.type = 'progress'
-  pv.value = '60'
-  pv.max = '100'
-  const pvProps = serializeProps(pv, 'progress')
-  ok(pvProps.value === 60 && pvProps.max === 100, 'progress 覆盖规则：value/max 输出数字')
-
   const inp = createElement({ kind: 'rect' }, 0, 0, 100, 30)
   inp.type = 'input'
   inp.text = '请输入'
-  inp.value = '12'
   const inpProps = serializeProps(inp, 'input')
-  ok(inpProps.value === '12', 'input 默认规则：value 输出字符串')
+  ok(inpProps.placeholder === '请输入' && !('value' in inpProps), 'input 仅输出 placeholder（value 已移除，预填走 description）')
 
   const icon = createElement({ kind: 'rect' }, 0, 0, 20, 20)
   icon.type = 'icon'
   const iconProps = serializeProps(icon, 'icon')
-  ok(!('iconName' in iconProps) && !('name' in iconProps), 'icon 未设置图标名：省略（无默认 star，原则④⑥）')
-  icon.text = 'star'
-  const iconProps2 = serializeProps(icon, 'icon')
-  ok(iconProps2.iconName === 'star' && !('name' in iconProps2), 'icon 设置后输出 iconName（→ props.name），不污染顶层 name')
+  ok(Object.keys(iconProps).length === 0, 'icon 无 props（图标名/尺寸走 description，原则④⑥）')
 }
 
 // ---------- 校验器（注册表驱动） ----------

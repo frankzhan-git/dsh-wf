@@ -15,7 +15,6 @@ const zh = {
   'toast.containerHasKids': '包含子元素的容器不能设置为非容器',
   // 画板外壳
   'title': '界面草图',
-  'rootNameLabel': '画布名称',
   'new': '新建',
   'newTitle': '新建画布（自动保存当前）',
   'fullscreen': '全屏',

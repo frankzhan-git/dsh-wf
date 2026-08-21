@@ -27,6 +27,14 @@ export function inferType(el) {
   return 'container'
 }
 
+// 有效类型（显式优先；否则按包含关系/推断规则实时判定）：画布渲染与最小尺寸共用
+export function effTypeOf(elements, e) {
+  if (e.type) return e.type
+  const hasKids = elements.some((o) => o.id !== e.id && contains(e, o))
+  if (hasKids) return 'container'
+  return inferType(e) || 'container'
+}
+
 // 子元素排列方向：中心点 x 分布范围 >= y 分布范围 → horizontal，否则 vertical
 export function inferDirection(kids) {
   if (!kids.length) return 'vertical'

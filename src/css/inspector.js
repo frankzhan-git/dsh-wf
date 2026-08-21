@@ -1,10 +1,17 @@
-// 右栏：属性面板 + 校验问题
+// 右栏：控件设置 + 高度拖拽触发区 + 画布历史
 export const INSPECTOR_CSS = `
 .wf-right {
   flex: none; width: 304px;
   display: flex; flex-direction: column; min-height: 0;
   border-left: 1px solid var(--wf-border);
   box-sizing: border-box;
+}
+/* 拖拽调整历史高度时禁止选中文本 */
+.wf-right.wf-resizing { user-select: none; }
+/* 控件设置模块 */
+.wf-insp-wrap {
+  flex: 1 1 0%; min-height: 0;
+  display: flex; flex-direction: column;
 }
 .wf-insp {
   flex: 1 1 0%; min-height: 0;
@@ -16,6 +23,11 @@ export const INSPECTOR_CSS = `
   justify-content: center; align-items: center;
   color: var(--wf-text-2); font-size: 12px; text-align: center;
   white-space: pre-line; line-height: 2;
+}
+/* 高度拖拽触发区（画布历史 title 栏上边）：无视觉横线，仅 hover 显示缩放手柄光标 */
+.wf-resizer {
+  flex: none; height: 6px;
+  cursor: ns-resize; touch-action: none;
 }
 .wf-field-row { display: flex; flex-direction: column; gap: 5px; }
 .wf-field-head { display: flex; align-items: baseline; gap: 8px; }

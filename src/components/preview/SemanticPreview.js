@@ -53,9 +53,8 @@ function renderNode(node, key) {
         rows: (node.props && node.props.rows) || 3, readOnly: true,
       })
     case 'image':
-      return node.props && node.props.src
-        ? el('img', { key, className: 'wf-pv-image', src: node.props.src, alt: name, title })
-        : el('div', { key, className: 'wf-pv-image wf-pv-ph', title }, '图片')
+      // 图片仅陈述结构（无 src 字段），预览统一占位；资源需求走 description
+      return el('div', { key, className: 'wf-pv-image wf-pv-ph', title }, '图片')
     case 'video':
       return el('div', { key, className: 'wf-pv-media wf-pv-video', title },
         el('span', { className: 'wf-pv-media-play' }, '▶'), '视频')

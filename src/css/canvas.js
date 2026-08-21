@@ -25,12 +25,25 @@ export const CANVAS_CSS = `
 .wf-canvas-draw .wf-note,
 .wf-canvas-draw .wf-text-el,
 .wf-canvas-draw .wf-arrow { cursor: crosshair !important; }
+/* 空格按住（空间平移）：无论模式、无论鼠标在画布还是控件上，一律手型光标；
+   拖拽中（pan）显示抓握态。!important 覆盖 draw 模式 crosshair 与控件 move */
+.wf-canvas-space .wf-rect,
+.wf-canvas-space .wf-note,
+.wf-canvas-space .wf-text-el,
+.wf-canvas-space .wf-arrow,
+.wf-canvas-space .wf-handle { cursor: grab !important; }
+.wf-canvas-pan .wf-rect,
+.wf-canvas-pan .wf-note,
+.wf-canvas-pan .wf-text-el,
+.wf-canvas-pan .wf-arrow,
+.wf-canvas-pan .wf-handle { cursor: grabbing !important; }
 .wf-rect {
   fill: color-mix(in srgb, var(--wf-accent) 5%, transparent);
   stroke: var(--wf-border-strong); stroke-width: 1.2;
   cursor: move;
 }
-/* 类型化样式：画布上一眼区分控件类型（每种类型渲染为真实 UI 组件形态） */
+/* 类型化样式：画布上一眼区分控件类型（每种类型渲染为真实 UI 组件形态）
+   填充体系（单一规范）：静态区 = bg-sunken；强调区 = accent 混色；无背景类 = transparent + 弱描边 */
 .wf-rect-auto { stroke-dasharray: 5 4; }                                   /* 待推断：虚线 */
 .wf-rect-container { fill: color-mix(in srgb, var(--wf-accent) 3%, transparent); }
 .wf-rect-page {
@@ -41,34 +54,42 @@ export const CANVAS_CSS = `
   fill: color-mix(in srgb, var(--wf-accent) 14%, transparent);
   stroke: color-mix(in srgb, var(--wf-accent) 50%, transparent);
 }
-.wf-rect-input, .wf-rect-textarea { fill: color-mix(in srgb, #000 16%, transparent); }
+/* 输入框：弱框 + accent 下划线；文本域：全边框强描边（形态区分） */
+.wf-rect-input { fill: var(--wf-bg-sunken); stroke: var(--wf-border); }
+.wf-rect-textarea { fill: var(--wf-bg-sunken); stroke: var(--wf-border-strong); }
 .wf-rect-underline { stroke: color-mix(in srgb, var(--wf-accent) 55%, transparent); stroke-width: 1.6; }
-.wf-rect-image { fill: color-mix(in srgb, #000 12%, transparent); }
-.wf-rect-cross { stroke: var(--wf-border-strong); stroke-width: 1; }
-.wf-rect-video { fill: color-mix(in srgb, #000 14%, transparent); }
+.wf-rect-image { fill: var(--wf-bg-sunken); }                              /* 图片 = 槽位 */
+.wf-rect-image-glyph { fill: none; stroke: var(--wf-border-strong); stroke-width: 1.4; stroke-linecap: round; stroke-linejoin: round; }
+.wf-rect-video { fill: var(--wf-bg-sunken); }
 .wf-rect-play { fill: var(--wf-accent); }
-.wf-rect-audio { fill: color-mix(in srgb, var(--wf-accent) 8%, transparent); }
-.wf-rect-music { fill: var(--wf-text-2); font-size: 18px; }
+.wf-rect-audio { fill: var(--wf-bg-sunken); }
+.wf-rect-audio-glyph { fill: var(--wf-text-2); }
+.wf-rect-audio-wave { fill: none; stroke: var(--wf-text-2); stroke-width: 1.6; stroke-linecap: round; }
 .wf-rect-icon { fill: color-mix(in srgb, var(--wf-accent) 10%, transparent); }
+.wf-rect-icon-glyph { fill: none; stroke: var(--wf-accent); stroke-width: 1.6; stroke-linejoin: round; }
 .wf-rect-link-text { fill: var(--wf-accent); font-size: 13px; }
 .wf-rect-link-line { stroke: var(--wf-accent); stroke-width: 1; opacity: .8; }
-.wf-rect-arrow { fill: var(--wf-text-2); font-size: 12px; }
+.wf-rect-link-glyph { fill: none; stroke: var(--wf-accent); stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.wf-rect-select-chev { fill: none; stroke: var(--wf-text-2); stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
 .wf-rect-box { fill: var(--wf-bg-sunken); stroke: var(--wf-border-strong); stroke-width: 1.2; }
-.wf-rect-box-check { fill: var(--wf-accent); font-size: 12px; }
+.wf-rect-box-check { fill: none; stroke: var(--wf-accent); stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
 .wf-rect-circle { fill: transparent; stroke: var(--wf-border-strong); stroke-width: 1.2; }
 .wf-rect-circle-dot { fill: var(--wf-accent); }
-.wf-rect-switch { fill: color-mix(in srgb, var(--wf-accent) 60%, transparent); }
+.wf-rect-switch { fill: var(--wf-bg-sunken); stroke: var(--wf-border-strong); stroke-width: 1.2; }
+.wf-rect-switch-on { fill: color-mix(in srgb, var(--wf-accent) 65%, transparent); stroke: color-mix(in srgb, var(--wf-accent) 50%, transparent); }
 .wf-rect-switch-knob { fill: #fff; }
 .wf-rect-progress-bg { fill: var(--wf-bg-sunken); stroke: var(--wf-border); stroke-width: 1; }
 .wf-rect-progress-fill { fill: color-mix(in srgb, var(--wf-accent) 65%, transparent); }
 .wf-rect-divider { stroke: var(--wf-border-strong); stroke-width: 1.4; }
+.wf-rect-divider-cap { stroke: var(--wf-border-strong); stroke-width: 1.4; stroke-linecap: round; }
 .wf-rect-badge {
   fill: color-mix(in srgb, var(--wf-accent) 18%, transparent);
   stroke: transparent;
 }
+/* 通用占位虚框（ghost）：无背景控件（文本/复选/单选/开关/空链接）的弱视觉外框，圈定组件大小 */
+.wf-rect-ghost { fill: transparent; stroke: var(--wf-border); stroke-dasharray: 5 4; }
 .wf-rect-text-center { text-anchor: middle; }
 .wf-rect-text-ph { fill: var(--wf-text-2); }
-.wf-rect-text-dim { fill: var(--wf-text-2); font-size: 11px; }
 .wf-rect.wf-selected { stroke: var(--wf-accent); stroke-width: 1.8; stroke-dasharray: none; }
 .wf-text-el { fill: var(--wf-text); font-size: 15px; cursor: default; }
 .wf-note {
@@ -130,7 +151,7 @@ export const CANVAS_CSS = `
 .wf-el-name-auto rect { stroke-dasharray: 3 2; }
 .wf-el-name-auto text { fill: var(--wf-text-2); font-weight: 500; }
 
-/* 画布内悬浮层（左上角模式徽标 / 右上角预览按钮 / 右下角缩放 / 输出面板） */
+/* 画布内悬浮层（左上角模式徽标 / 右上角 JSONL·预览·设置按钮 / 右下角缩放 / 输出面板） */
 .wf-canvas-overlay {
   position: absolute; inset: 14px 16px;
   pointer-events: none;

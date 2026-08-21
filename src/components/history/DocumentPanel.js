@@ -1,23 +1,23 @@
-// 画布文档面板（纯展示 + 回调）：列表（名称/时间/元素数）+ 打开 + 重命名 + 删除（二次确认）+ 导出 + 导入
+// 画布文档面板（纯展示 + 回调）：列表（名称/创建日期）+ 打开 + 重命名 + 删除（二次确认）+ 导出 + 导入
 // 由 HistoryPanel 升级（S4）：数据源为 CanvasStore 文档（meta），支持文档级管理
 import React from 'react'
 import { IconTrashOutline16, IconCloseOutline16, IconDownloadOutline16 } from '@deepseek-ai/dsh-client-ui-primitives'
 
 const el = React.createElement
 
-// 时间格式化（纯函数，随组件维护）
-function fmtTime(iso) {
+// 日期格式化（纯函数，随组件维护）：只显示日期（创建日期），不显示时分秒
+function fmtDate(iso) {
   try {
     const d = new Date(iso)
     const pad = (n) => String(n).padStart(2, '0')
-    return `${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
   } catch (e) {
     return ''
   }
 }
 
 export function DocumentPanel(props) {
-  const { docs, currentId, onLoad, onDelete, onRename, onExport, onImport } = props
+  const { docs, currentId, onLoad, onDelete, onRename, onExport, onImport, height } = props
   // 删除二次确认（纯 UI 状态）：点击垃圾桶进入确认态，超时自动恢复
   const [confirmId, setConfirmId] = React.useState(null)
   const confirmTimer = React.useRef(null)
@@ -37,9 +37,12 @@ export function DocumentPanel(props) {
     if (renameId && name) onRename(renameId, name)
     setRenameId(null)
   }
-  return el('div', { className: 'wf-history' },
+  // title 栏：标题 + 文档数在左，导入按钮在右；列表使用拖拽设定的高度
+  return el('div', { className: 'wf-history', style: { height } },
     el('div', { className: 'wf-history-head' },
-      el('span', { className: 'wf-history-title' }, '画布文档'),
+      el('span', { className: 'wf-history-title' }, '画布历史'),
+      el('span', { className: 'wf-history-count' }, docs.length + ' 个'),
+      el('span', { className: 'wf-spacer' }),
       el('button', {
         type: 'button', className: 'wf-mini-btn', title: '导入画布文件（.dshwf.json）',
         onClick: () => { if (fileRef.current) fileRef.current.click() },
@@ -53,7 +56,6 @@ export function DocumentPanel(props) {
           ev.target.value = ''
         },
       }),
-      el('span', { className: 'wf-history-count' }, docs.length + ' 个'),
     ),
     docs.length
       ? el('div', { className: 'wf-history-list' },
@@ -82,7 +84,7 @@ export function DocumentPanel(props) {
                 className: 'wf-history-name',
                 onDoubleClick: (ev) => { ev.stopPropagation(); startRename(h) },
               }, h.name),
-            el('span', { className: 'wf-history-meta' }, (h.elementCount || 0) + ' 个 · ' + fmtTime(h.updatedAt)),
+            el('span', { className: 'wf-history-meta' }, fmtDate(h.createdAt || h.updatedAt)),
             confirmId === h.id
               ? el('span', { className: 'wf-history-confirm', onClick: (ev) => ev.stopPropagation() },
                   el('button', {

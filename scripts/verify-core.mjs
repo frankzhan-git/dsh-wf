@@ -1,4 +1,4 @@
-﻿// 验证脚本：模拟草图 → 解析管线 → 对照 JSON 设计原则断言
+// 验证脚本：模拟草图 → 解析管线 → 对照 JSON 设计原则断言
 // 用法：node scripts/verify-core.mjs
 import { createElement } from '../src/core/model.js'
 import { buildResult } from '../src/core/pipeline.js'
@@ -57,7 +57,7 @@ section('场景 2：商品卡片')
   card.text = '商品卡片'
   els.push(card)
   const img = createElement({ kind: 'rect', type: 'image' }, 130, 90, 180, 160)
-  img.src = 'https://example.com/product.jpg'
+  img.note = '商品主图，产品实拍' // 资源/内容细节走 description，不再是 props.src
   els.push(img)
   const info = createElement({ kind: 'rect' }, 340, 90, 320, 160)
   els.push(info)
@@ -75,7 +75,8 @@ section('场景 2：商品卡片')
   const r = buildResult(els, '商品详情页')
   console.log(r.jsonl)
   ok(r.jsonl.includes('"direction":"horizontal"'), '水平排列显式输出 direction')
-  ok(r.jsonl.includes('"type":"image"') && r.jsonl.includes('"src":"https://example.com/product.jpg"'), 'image + src')
+  ok(r.jsonl.includes('"type":"image"') && !r.jsonl.includes('"src"'), 'image 仅结构陈述：无 src 字段（资源走 description）')
+  ok(r.jsonl.includes('"description":"商品主图，产品实拍"'), 'image 资源需求进 description')
   ok(!r.jsonl.includes('"name":"图片"'), '原则6：自动 name 省略')
   ok(r.tree.children[0].direction === 'horizontal', '商品卡片内部树 direction=horizontal')
   ok(r.issues.filter((i) => i.level === 'error').length === 0, '无 error')
@@ -233,13 +234,10 @@ section('场景 8：props 补齐')
   els.push(page)
   const pv = createElement({ kind: 'rect' }, 60, 60, 300, 20)
   pv.type = 'progress'
-  pv.value = '60'
-  pv.max = '100'
   els.push(pv)
   const inp = createElement({ kind: 'rect' }, 60, 100, 300, 36)
   inp.type = 'input'
   inp.text = '请输入数量'
-  inp.value = '12'
   els.push(inp)
   const sw = createElement({ kind: 'rect' }, 60, 150, 80, 24)
   sw.type = 'switch'
@@ -247,29 +245,26 @@ section('场景 8：props 补齐')
   els.push(sw)
   const cb = createElement({ kind: 'rect' }, 60, 190, 200, 24)
   cb.type = 'checkbox'
-  cb.label = '记住我'
+  cb.text = '记住我'
   cb.checked = true
   els.push(cb)
   const img = createElement({ kind: 'rect' }, 60, 230, 120, 80)
   img.type = 'image'
-  img.src = 'https://example.com/a.png'
-  img.alt = '商品主图'
   els.push(img)
   const lnk = createElement({ kind: 'rect' }, 60, 330, 160, 24)
   lnk.type = 'link'
   lnk.text = '查看详情'
-  lnk.href = 'https://example.com/detail'
   els.push(lnk)
 
   const r = buildResult(els, '画布')
   console.log(r.jsonl)
   const j = r.jsonl
-  ok(j.includes('"value":60') && j.includes('"max":100'), 'progress 输出 value/max（数字）')
-  ok(j.includes('"value":"12"'), 'input 输出默认值 value')
+  ok(j.includes('"type":"progress"') && !j.includes('"value"') && !j.includes('"max"'), 'progress 无 props（进度是运行态，走 description）')
+  ok(!j.includes('"value":"12"'), 'input 不输出 value（预填走 description）')
   ok(j.includes('"checked":true'), 'switch 输出 checked')
-  ok(j.includes('"label":"记住我"') && j.includes('"checked":true'), 'checkbox 输出 label/checked')
-  ok(j.includes('"alt":"商品主图"'), 'image 输出 alt')
-  ok(j.includes('"href":"https://example.com/detail"'), 'link 输出 href')
+  ok(j.includes('"text":"记住我"') && j.includes('"checked":true'), 'checkbox 输出 text/checked（标签并入 text）')
+  ok(j.includes('"type":"image"') && !j.includes('"alt"'), 'image 无 props（无 alt/src，细节走 description）')
+  ok(j.includes('"text":"查看详情"') && !j.includes('"href"'), 'link 仅输出 text（无 href）')
   for (const line of r.jsonl.split('\n')) JSON.parse(line)
 }
 

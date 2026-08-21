@@ -65,15 +65,16 @@ export const BASE_CSS = `
   height: 52px; padding: 0 18px; box-sizing: border-box;
   border-bottom: 1px solid var(--wf-border);
 }
-.wf-title { font-size: 16px; font-weight: 500; }
-.wf-rootname { display: inline-flex; align-items: center; gap: 6px; color: var(--wf-text-2); font-size: 12px; }
-.wf-rootname input {
-  width: 140px; padding: 4px 8px;
-  background: var(--wf-bg-sunken); color: var(--wf-text);
-  border: 1px solid var(--wf-border); border-radius: 6px;
-  font-size: 12px;
+/* 顶栏右上角功能菜单：新建 | 最大化/最小化 | 关闭 */
+.wf-head-menu { display: flex; align-items: center; gap: 2px; }
+/* 右栏模块标题栏（控件设置 / 画布历史） */
+.wf-panel-head {
+  flex: none; display: flex; align-items: center; gap: 8px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--wf-border);
 }
-.wf-rootname input:focus { outline: 2px solid var(--wf-accent); outline-offset: -1px; }
+.wf-panel-title { font-size: 12px; font-weight: 500; color: var(--wf-text); }
+.wf-title { font-size: 16px; font-weight: 500; }
 .wf-spacer { flex: 1; }
 .wf-icon-btn {
   display: inline-flex; align-items: center; justify-content: center;

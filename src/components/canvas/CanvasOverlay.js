@@ -6,7 +6,7 @@ import { SemanticPreview } from '../preview/SemanticPreview.js'
 import { buildInsertText } from '../../core/prompt.js'
 import {
   IconCodeOutline16, IconChecklistOutline14, IconCloseOutline16,
-  IconRefreshOutline16, IconTrashOutline16, IconCopyOutline16,
+  IconRefreshOutline16, IconTrashOutline16, IconCopyOutline16, IconSettingsOutline16,
 } from '@deepseek-ai/dsh-client-ui-primitives'
 
 const el = React.createElement
@@ -15,6 +15,7 @@ export function CanvasOverlay(props) {
   const {
     mode, onToggleMode, floatTab, onFloatTab, zoom, pan, onZoomReset, result, onCloseFloat,
     canUndo, canRedo, canClear, onUndo, onRedo, onClear,
+    panelOpen, onTogglePanel,
   } = props
   // 语义预览：多页面模式下按页面切换（纯 UI 状态），默认第一个页面
   const [pvIdx, setPvIdx] = React.useState(0)
@@ -48,12 +49,13 @@ export function CanvasOverlay(props) {
   return el('div', { className: 'wf-canvas-overlay' },
     el('div', {
       className: 'wf-mode-badge' + (mode === 'draw' ? ' wf-mode-badge-draw' : ''),
-      title: '点击或按 V 键切换模式',
+      title: '点击切换模式；长按 Alt 临时进入绘制模式，松开恢复选择',
       onClick: onToggleMode,
     },
-      mode === 'select' ? '选择模式' : '控件模式',
-      el('kbd', { className: 'wf-mode-key' }, 'V'),
+      mode === 'select' ? '选择模式' : '绘制模式',
+      el('kbd', { className: 'wf-mode-key' }, 'Alt'),
     ),
+    // 右上角工具行：JSONL · 预览 · 设置（右侧面板显示/隐藏开关）
     el('div', { className: 'wf-canvas-tools' },
       el('button', {
         type: 'button',
@@ -67,6 +69,13 @@ export function CanvasOverlay(props) {
         title: '查看语义预览',
         onClick: () => onFloatTab(floatTab === 'preview' ? null : 'preview'),
       }, el(IconChecklistOutline14, { size: 14 }), '预览'),
+      el('button', {
+        type: 'button',
+        className: 'wf-ctool' + (panelOpen ? ' wf-ctool-on' : ''),
+        title: panelOpen ? '隐藏右侧面板' : '显示右侧面板',
+        onClick: onTogglePanel,
+      },
+        el(IconSettingsOutline16, { size: 14 }), '设置'),
     ),
     // 右下角：撤销/重做/清空（不可用即隐藏）+ 缩放
     el('div', { className: 'wf-canvas-actions' },

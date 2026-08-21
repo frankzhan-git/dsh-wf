@@ -49,18 +49,18 @@ section('各类型 props 输出')
   const cases = [
     { type: 'text', el: { text: '你好' }, expect: { text: '你好' } },
     { type: 'button', el: { text: '登录', action: '提交' }, expect: { text: '登录', action: '提交' } },
-    { type: 'input', el: { text: '请输入', value: '12', inputType: 'password' }, expect: { placeholder: '请输入', value: '12', inputType: 'password' } },
-    { type: 'textarea', el: { text: '请输入详情', value: '内容' }, expect: { placeholder: '请输入详情', value: '内容' } },
-    { type: 'image', el: { src: 'a.png', alt: '主图' }, expect: { src: 'a.png', alt: '主图' } },
-    { type: 'video', el: { src: 'a.mp4', poster: 'p.jpg', autoplay: true }, expect: { src: 'a.mp4', poster: 'p.jpg', autoplay: true } },
-    { type: 'audio', el: { src: 'a.mp3', controls: true }, expect: { src: 'a.mp3', controls: true } },
-    { type: 'icon', el: { text: 'star', iconSize: '24' }, expect: { iconName: 'star', size: 24 } },
-    { type: 'link', el: { text: '详情', href: 'https://x' }, expect: { text: '详情', href: 'https://x' } },
-    { type: 'select', el: { optionsText: 'A, B', value: 'A' }, expect: { options: ['A', 'B'], value: 'A' } },
-    { type: 'checkbox', el: { label: '记住我', checked: true }, expect: { label: '记住我', checked: true } },
-    { type: 'radio', el: { label: '男', checked: true, optionsText: '男,女', value: '男' }, expect: { label: '男', checked: true, options: ['男', '女'], value: '男' } },
+    { type: 'input', el: { text: '请输入', inputType: 'password' }, expect: { placeholder: '请输入', inputType: 'password' } }, // value 已移除（预填走 description）
+    { type: 'textarea', el: { text: '请输入详情' }, expect: { placeholder: '请输入详情' } },
+    { type: 'image', el: { src: 'a.png', alt: '主图' }, expect: {} },  // 资源/替代文本走 description，无 props
+    { type: 'video', el: { src: 'a.mp4', poster: 'p.jpg', autoplay: true }, expect: {} },
+    { type: 'audio', el: { src: 'a.mp3', controls: true }, expect: {} },
+    { type: 'icon', el: { text: 'star', iconSize: '24' }, expect: {} }, // 图标名/尺寸走 description，无 props
+    { type: 'link', el: { text: '详情', href: 'https://x' }, expect: { text: '详情' } }, // href 走 description
+    { type: 'select', el: { optionsText: 'A, B' }, expect: { options: ['A', 'B'] } }, // value 已移除（默认选中走 description）
+    { type: 'checkbox', el: { text: '记住我', checked: true }, expect: { text: '记住我', checked: true } }, // 标签并入 text
+    { type: 'radio', el: { text: '男', checked: true }, expect: { text: '男', checked: true } }, // 单选项语义：与 checkbox 对称，无 options（互斥组由容器结构表达）
     { type: 'switch', el: { checked: true }, expect: { checked: true } },
-    { type: 'progress', el: { value: '60', max: '100' }, expect: { value: 60, max: 100 } },
+    { type: 'progress', el: { value: '60', max: '100' }, expect: {} }, // 进度是运行态，无 props（细节走 description）
     { type: 'divider', el: { text: 'x' }, expect: {} },
     { type: 'badge', el: { text: '新品' }, expect: { text: '新品' } },
     { type: 'container', el: { direction: 'horizontal', wrap: true }, expect: {} }, // 容器 props 无字段（direction/wrap 是节点级）
@@ -92,8 +92,6 @@ section('pipeline 集成')
   els.push(btn)
   const pv = createElement({ kind: 'rect' }, 60, 270, 300, 16)
   pv.type = 'progress'
-  pv.value = '60'
-  pv.max = '100'
   els.push(pv)
 
   const r = buildResult(els, '界面')
@@ -101,7 +99,7 @@ section('pipeline 集成')
   ok(r.jsonl.includes('"placeholder":"请输入用户名"'), 'input placeholder（text → placeholder）')
   ok(r.jsonl.includes('"inputType":"password"'), 'inputType 输出')
   ok(r.jsonl.includes('"action":"提交登录"'), 'button action 输出')
-  ok(r.jsonl.includes('"value":60') && r.jsonl.includes('"max":100'), 'progress 数字 value/max')
+  ok(r.jsonl.includes('"type":"progress"') && !r.jsonl.includes('"value"') && !r.jsonl.includes('"max"'), 'progress 无 props（进度是运行态）')
   ok(!r.jsonl.includes('"name":"界面"'), 'page 根不使用 rootName 注入（页面有自己的 name）')
   ok(r.issues.filter((i) => i.level === 'error').length === 0, '无 error')
   for (const line of r.jsonl.split('\n')) JSON.parse(line)
@@ -122,10 +120,9 @@ section('schema.json 一致性')
     const extra = enumTypes.filter((t) => !TYPE_BY_TYPE[t])
     ok(missing.length === 0, `注册表类型全部在 schema.json enum 内（缺失：${missing.join(',') || '无'}）`)
     ok(extra.length === 0, `schema.json 无注册表外类型（多余：${extra.join(',') || '无'}）`)
-    // props 一致性：注册表产出的 JSONL key ⊆ schema props（iconName 序列化为 props.name）
+    // props 一致性：注册表产出的 JSONL key ⊆ schema props
     const schemaProps = Object.keys(schema?.$defs?.props?.properties || {})
-    const outputKeyOf = (key) => (key === 'iconName' ? 'name' : key)
-    const badProps = Object.keys(PROPS_BY_KEY).filter((k) => !schemaProps.includes(outputKeyOf(k)))
+    const badProps = Object.keys(PROPS_BY_KEY).filter((k) => !schemaProps.includes(k))
     ok(badProps.length === 0, `注册表字段全部在 schema.json props 内（缺失：${badProps.join(',') || '无'}）`)
   }
 }

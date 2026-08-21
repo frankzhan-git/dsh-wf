@@ -24,10 +24,15 @@ export function CanvasStage(props) {
   // 渲染层级（用户规范）：页面永远在最底部（先渲染 = SVG 底层），其内部控件在其上
   // 稳定排序保持数组原有顺序（页面之间/控件之间 z 序不变）
   const orderedElements = elements.slice().sort((a, b) => ((a.type === 'page' ? 0 : 1) - (b.type === 'page' ? 0 : 1)))
+  // 空格按住：整体加 space/pan 类，CSS 强制所有子元素（控件）光标为手型，
+  // 覆盖 .wf-rect{cursor:move} 与 draw 模式 crosshair !important
+  const spaceCls = spaceDown
+    ? (drag && drag.mode === 'pan' ? ' wf-canvas-pan' : ' wf-canvas-space')
+    : ''
   return el('div', { className: 'wf-canvas-view', ref: viewRef },
     el('svg', {
       ref: svgRef,
-      className: 'wf-canvas' + (mode === 'draw' ? ' wf-canvas-draw' : ''),
+      className: 'wf-canvas' + (mode === 'draw' ? ' wf-canvas-draw' : '') + spaceCls,
       viewBox: pan.x + ' ' + pan.y + ' ' + vw + ' ' + vh,
       preserveAspectRatio: 'xMidYMid meet',
       style: { cursor: canvasCursor },

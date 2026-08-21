@@ -40,24 +40,15 @@
       "description": "所有类型通用 props 的并集；具体类型只使用其中相关字段",
       "type": "object",
       "properties": {
-        "text": { "description": "文本内容 / 按钮文字 / 链接文字 / 徽标文字", "type": "string" },
+        "text": { "description": "文本内容 / 按钮文字 / 链接文字 / 徽标文字 / 复选框·单选框标签", "type": "string" },
         "action": { "description": "点击动作描述（button）", "type": "string" },
         "placeholder": { "description": "占位提示（input/textarea）", "type": "string" },
-        "value": { "description": "默认值 / 进度值 / 选中值（input/textarea/select/radio/progress）" },
         "inputType": {
           "description": "输入类型（input），避免与节点 type 字段混淆",
           "type": "string",
           "enum": ["text", "number", "password", "email", "tel", "url", "search", "date", "time"]
         },
         "rows": { "description": "行数（textarea）", "type": "integer", "minimum": 1 },
-        "src": { "description": "地址（image/video/audio）", "type": "string" },
-        "alt": { "description": "替代文本（image）", "type": "string" },
-        "poster": { "description": "封面图（video）", "type": "string" },
-        "autoplay": { "description": "是否自动播放（video）", "type": "boolean" },
-        "controls": { "description": "是否显示控制条（audio）", "type": "boolean" },
-        "name": { "description": "图标名称（icon）", "type": "string" },
-        "size": { "description": "尺寸（icon）", "type": "number" },
-        "href": { "description": "链接地址（link）", "type": "string" },
         "options": {
           "description": "选项数组（select）：字符串或 {label, value} 对象",
           "type": "array",
@@ -75,9 +66,7 @@
             ]
           }
         },
-        "label": { "description": "标签文字（checkbox）", "type": "string" },
         "checked": { "description": "是否选中/打开（checkbox/radio/switch）", "type": "boolean" },
-        "max": { "description": "最大值（progress）", "type": "number" },
         "columns": { "description": "网格列数（container 网格效果）", "type": "integer", "minimum": 1 }
       },
       "additionalProperties": true

@@ -1,6 +1,6 @@
 {
   "name": "dsh-wf",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "界面草图：会话输入框内绘制界面草图，一键转为 JSONL 语义嵌入输入框，随需求发给 DSH agent",
   "private": true,
   "type": "module",
@@ -13,7 +13,7 @@
   },
   "scripts": {
     "build": "node scripts/build.mjs",
-    "verify": "node scripts/verify-core.mjs && node scripts/verify-jsonhl.mjs && node scripts/verify-registry.mjs && node scripts/verify-serializer.mjs && node scripts/verify-interactions.mjs && node scripts/verify-storage.mjs && node scripts/verify-adapter-contract.mjs && node scripts/verify-host-storage.mjs && node scripts/verify-perf.mjs"
+    "verify": "node scripts/verify-core.mjs && node scripts/verify-jsonhl.mjs && node scripts/verify-registry.mjs && node scripts/verify-serializer.mjs && node scripts/verify-interactions.mjs && node scripts/verify-newcanvas.mjs && node scripts/verify-storage.mjs && node scripts/verify-adapter-contract.mjs && node scripts/verify-host-storage.mjs && node scripts/verify-perf.mjs"
   },
   "devDependencies": {
     "esbuild": "^0.24.0"

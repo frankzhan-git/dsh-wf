@@ -1,7 +1,7 @@
 // 画板浮层（conversation.input.overlay）：绘制草图 → 实时 JSONL + 语义预览 → 插入输入框
 // S2 重构后为纯编排层（≤300 行）：状态在 useSketchState，交互在 useCanvasInteractions，
 // 编辑动作在 useCanvasEdit，画布管理/自动保存在 useCanvasManager，全部计算在 core/interactions 纯函数
-// 渲染委托给纯展示子组件：CanvasStage / CanvasOverlay / InspectorPanel / DocumentPanel
+// 渲染委托给纯展示子组件：CanvasStage / CanvasOverlay / RightPanel（控件设置 + 画布历史）
 import React from 'react'
 import { CANVAS_W, CANVAS_H, cloneElements } from '../core/model.js'
 import { contains, inferType } from '../core/infer.js'
@@ -18,8 +18,7 @@ import { setOpen } from '../core/store.js'
 import { t } from '../i18n/index.js'
 import { CanvasStage } from './canvas/CanvasStage.js'
 import { CanvasOverlay } from './canvas/CanvasOverlay.js'
-import { InspectorPanel } from './inspector/InspectorPanel.js'
-import { DocumentPanel } from './history/DocumentPanel.js'
+import { RightPanel } from './RightPanel.js'
 import { TYPE_LABEL } from './common/typeLabels.js'
 import { Toast } from './common/Toast.js'
 import { IconPlusOutline16, IconCloseOutline16, IconFullscreenOutline16, IconDownloadOutline16 } from '@deepseek-ai/dsh-client-ui-primitives'
@@ -29,6 +28,8 @@ const el = React.createElement
 export function SketchModal(props) {
   const open = useOpen()
   const p = props || {}
+  // 右侧面板显示开关（画布左上角「设置」按钮控制）；hooks 必须位于 early return 之前
+  const [panelOpen, setPanelOpen] = React.useState(true)
   // 所有 hooks 必须位于 early return 之前（React 规则）
   const draft = (p.useInput || (() => null))((s) => (s && typeof s.draft === 'string' ? s.draft : ''))
   const { toast, showToast } = useToasts(open)
@@ -153,28 +154,26 @@ export function SketchModal(props) {
 
   return el('div', { className: 'wf-mask', onClick: () => setOpen(false) },
     el('div', { className: 'wf-modal' + (interactions.fullscreen ? ' wf-modal-fs' : ''), onClick: (ev) => ev.stopPropagation() },
-      // 顶栏
+      // 顶栏：标题在左，功能菜单（新建 | 最大化/最小化 | 关闭）在右上角（画布改名走历史列表）
       el('div', { className: 'wf-head' },
         el('span', { className: 'wf-title' }, t('title')),
-        el('label', { className: 'wf-rootname' },
-          t('rootNameLabel'),
-          el('input', { value: sketch.rootName, onChange: (ev) => sketch.setRootName(ev.target.value) }),
-        ),
         el('span', { className: 'wf-spacer' }),
-        el('button', {
-          type: 'button',
-          className: 'wf-icon-btn',
-          title: interactions.fullscreen ? t('exitFullscreen') : t('fullscreen'),
-          onClick: () => interactions.setFullscreen(!interactions.fullscreen),
-        },
-          interactions.fullscreen ? el(IconDownloadOutline16, { size: 14 }) : el(IconFullscreenOutline16, { size: 14 }),
+        el('div', { className: 'wf-head-menu' },
+          el('button', { type: 'button', className: 'wf-mini-btn wf-new-btn', title: t('newTitle'), onClick: manager.newCanvas },
+            el(IconPlusOutline16, { size: 14 }), t('new')),
+          el('button', {
+            type: 'button',
+            className: 'wf-icon-btn',
+            title: interactions.fullscreen ? t('exitFullscreen') : t('fullscreen'),
+            onClick: () => interactions.setFullscreen(!interactions.fullscreen),
+          },
+            interactions.fullscreen ? el(IconDownloadOutline16, { size: 14 }) : el(IconFullscreenOutline16, { size: 14 }),
+          ),
+          el('button', {
+            type: 'button', className: 'wf-icon-btn', title: t('close'),
+            onClick: () => setOpen(false),
+          }, el(IconCloseOutline16, { size: 14 })),
         ),
-        el('button', { type: 'button', className: 'wf-mini-btn wf-new-btn', title: t('newTitle'), onClick: manager.newCanvas },
-          el(IconPlusOutline16, { size: 14 }), t('new')),
-        el('button', {
-          type: 'button', className: 'wf-icon-btn', title: t('close'),
-          onClick: () => setOpen(false),
-        }, el(IconCloseOutline16, { size: 14 })),
       ),
       // 主体：画布 + 右栏（画布占满左栏空出的空间）
       el('div', { className: 'wf-body' },
@@ -208,23 +207,20 @@ export function SketchModal(props) {
             canRedo: sketch.future.length > 0,
             canClear: sketch.elements.length > 1, // 仅保留预置空页面时不显示清空
             onUndo: sketch.undo, onRedo: sketch.redo, onClear: manager.clearAll,
+            panelOpen, onTogglePanel: () => setPanelOpen(!panelOpen),
           }),
         ),
-        // 右栏：属性 + 画布历史
-        el('div', { className: 'wf-right' },
-          el(InspectorPanel, {
-            sel, selCount: sketch.selectedIds.length, selHasKids,
-            selIsNested: !!sel && sketch.elements.some((o) => o.id !== sel.id && contains(o, sel)),
-            selTypeOptions: edit.selTypeOptions(sel),
-            selTypeLabel, onPatch: edit.patchSel, onRemove: () => edit.removeEl(sel.id),
-          }),
-          el(DocumentPanel, {
-            docs: manager.docs, currentId: sketch.currentId,
-            onLoad: manager.loadCanvas, onDelete: manager.delCanvas,
-            onRename: manager.renameCanvas, onExport: manager.exportCanvas,
-            onImport: manager.importCanvas,
-          }),
-        ),
+        // 右栏：控件设置 + 画布历史（可折叠/可拖高；由画布左上角「设置」按钮整体显隐）
+        panelOpen ? el(RightPanel, {
+          sel, selCount: sketch.selectedIds.length, selHasKids,
+          selIsNested: !!sel && sketch.elements.some((o) => o.id !== sel.id && contains(o, sel)),
+          selTypeOptions: edit.selTypeOptions(sel),
+          selTypeLabel, onPatch: edit.patchSel, onRemove: () => edit.removeEl(sel.id),
+          docs: manager.docs, currentId: sketch.currentId,
+          onLoad: manager.loadCanvas, onDelete: manager.delCanvas,
+          onRename: manager.renameCanvas, onExport: manager.exportCanvas,
+          onImport: manager.importCanvas,
+        }) : null,
       ),
       // 底栏（状态文本已移除，仅操作按钮）
       el('div', { className: 'wf-footer' },
