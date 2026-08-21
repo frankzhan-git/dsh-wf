@@ -215,9 +215,9 @@ export function updateDrag(ctx, drag, x, y, clientX, clientY) {
   if (drag.mode === 'groupResize') return { patches: computeGroupResize(ctx, drag, x, y) }
   if (drag.mode === 'groupEdgeResize') {
     const r = computeGroupEdgeResize(ctx, drag, x, y)
-    // 记录本帧累计位移（多帧拖动增量：computeGroupEdgeResize 用 lastDx/lastDy 计算每帧增量，
-    // 避免 elements 每帧更新后把累计位移重复累加导致「放大」）
-    return { patches: r.patches, snaps: r.snaps, lastDx: x - drag.sx, lastDy: y - drag.sy }
+    // lastDx/lastDy 记录「实际应用累计」（含吸附修正）——吸附锁定期间增量为 0，
+    // 避免修正重复叠加导致位置抖动/尺寸突变
+    return { patches: r.patches, snaps: r.snaps, lastDx: r.appX, lastDy: r.appY }
   }
   if (drag.mode === 'resize') {
     // resize 附带对齐吸附：patch 与吸附虚线分开返回（与 move 一致）
@@ -404,20 +404,19 @@ export function computeGroupResize(ctx, drag, x, y) {
 //  - l：左边移动 → 每个控件 x += 本帧增量 且 w -= 本帧增量（右边缘不动）
 //  - b：下边移动 → 每个控件高 + 本帧增量
 //  - t：上边移动 → 每个控件 y += 本帧增量 且 h -= 本帧增量（下边缘不动）
-// 增量语义：dx/dy 为本帧位移（累计位移 - lastDx/lastDy）；拖动中 elements 每帧更新，
-// 若用累计位移加到当前值会重复累加导致「放大」（与 computeMove 多帧修复同款）
-// 吸附：移动边（外框边）与「非选中元素」边缘对齐（容差 6/zoom，与 move/resize 一致），
-//       命中时全部控件按吸附修正量统一偏移；返回 { patches, snaps }（snaps 供吸附虚线）
+// 增量语义：**实际应用累计**（原始累计 + 吸附修正）减去 lastDx/lastDy——拖动中 elements 每帧更新，
+// 若用累计位移加到当前值会重复累加导致「放大」；吸附修正若不并入应用累计，会在已吸附的位置上
+// 每帧重复叠加（鼠标不动也持续飞走/尺寸突变）。返回 { patches, snaps, appX, appY }（appX/appY 供调用方更新 last）
+// 吸附：移动边（外框边）与「非选中元素」边缘对齐（容差 6/zoom，与 move/resize 一致）；
+//       容差内吸附锁定（面板不动），移出容差恢复跟随
 // 钳制：每控件按类型最小尺寸（钳制时该控件幅度不足满量，属必要保护）
 export function computeGroupEdgeResize(ctx, drag, x, y) {
   const side = drag.side
   const gb = drag.gb
   const cumX = x - drag.sx
   const cumY = y - drag.sy
-  const incX = side === 'l' || side === 'r' ? cumX - (drag.lastDx || 0) : 0
-  const incY = side === 't' || side === 'b' ? cumY - (drag.lastDy || 0) : 0
   const idSet = new Set(ctx.selectedIds)
-  // 移动边吸附（目标 = 非选中元素；容差与 move/resize 一致）
+  // 移动边吸附（目标 = 非选中元素；基于未吸附的原始累计位置判定）
   const tol = 6 / (ctx.zoom || 1)
   const snaps = []
   const targets = ctx.elements.filter((t) => !idSet.has(t.id) && t.kind !== 'arrow')
@@ -460,10 +459,15 @@ export function computeGroupEdgeResize(ctx, drag, x, y) {
     }
     if (bh) { adjY = bh.pos - edge; snaps.push({ axis: 'h', pos: bh.pos }) }
   }
-  // 逐控件应用：本帧增量 + 吸附修正
+  // 实际应用累计 = 原始累计 + 吸附修正；本帧增量 = 应用累计差（吸附锁定期间增量为 0，修正不重复应用）
+  const appX = cumX + adjX
+  const appY = cumY + adjY
+  const incX = side === 'l' || side === 'r' ? appX - (drag.lastDx || 0) : 0
+  const incY = side === 't' || side === 'b' ? appY - (drag.lastDy || 0) : 0
+  // 逐控件应用
   const patches = []
-  const dx = incX + adjX
-  const dy = incY + adjY
+  const dx = incX
+  const dy = incY
   for (const e of ctx.elements) {
     if (!idSet.has(e.id)) continue
     const min = minSizeOf(ctx.elements, e)
@@ -481,7 +485,7 @@ export function computeGroupEdgeResize(ctx, drag, x, y) {
     }
     patches.push(p)
   }
-  return { patches, snaps }
+  return { patches, snaps, appX, appY }
 }
 
 // 改尺寸（右下角手柄或四边）：按类型最小尺寸 + 移动边对齐吸附（阈值 6/zoom 与移动一致）+ 页面边界钳制

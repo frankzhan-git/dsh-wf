@@ -458,6 +458,54 @@ section('多选外框四边 resize：computeGroupEdgeResize')
   const aF2 = f2.patches.find((p) => p.id === elsF[0].id)
   ok(aF1.w === 110, '多帧：第 1 帧宽 +10（110）')
   ok(aF2.w === 120, '多帧：第 2 帧只加本帧增量（110+10=120，不重复累加成 130）')
+
+  // 多帧吸附回归（修复「吸附修正重复应用导致位置抖动/高度突变」）：
+  // 第 1 帧上边拖到 75 → 吸附到 C 下边缘 80（y=80, h=80）；
+  // 第 2 帧鼠标不动 → 位置必须保持（修正不得重复叠加）；
+  // 第 3 帧容差内微移 → 吸附锁定（面板不动）；移出容差 → 恢复跟随
+  const elsG = [mk(100, 100, 100, 60), mk(250, 100, 100, 60), mk(100, 60, 100, 20)]
+  const idsG = elsG.slice(0, 2).map((e) => e.id)
+  const gbG = groupBounds(elsG, idsG) // (100,100,250,60)，上边 100；C 下边缘 80
+  const dragG = { mode: 'groupEdgeResize', side: 't', sx: gbG.x, sy: gbG.y, gb: gbG }
+  const g1 = computeGroupEdgeResize({ elements: elsG, selectedIds: idsG, zoom: 1 }, dragG, gbG.x, gbG.y - 25)
+  const aG1 = g1.patches.find((p) => p.id === elsG[0].id)
+  ok(aG1.y === 80 && aG1.h === 80 && g1.snaps.some((s) => s.axis === 'h' && s.pos === 80), '吸附：第 1 帧上边吸附到 80（y=80, h=80，吸附修正并入应用累计）')
+  const elsG2 = elsG.map((e) => { const p = g1.patches.find((x) => x.id === e.id); return p ? Object.assign({}, e, p) : e })
+  const g2 = computeGroupEdgeResize({ elements: elsG2, selectedIds: idsG, zoom: 1 }, Object.assign({}, dragG, { lastDy: g1.appY }), gbG.x, gbG.y - 25)
+  const aG2 = g2.patches.find((p) => p.id === elsG[0].id)
+  ok(aG2.y === 80 && aG2.h === 80, '吸附：第 2 帧鼠标不动 → 位置保持（修正不重复应用，不抖动）')
+  const g3 = computeGroupEdgeResize({ elements: elsG2, selectedIds: idsG, zoom: 1 }, Object.assign({}, dragG, { lastDy: g1.appY }), gbG.x, gbG.y - 23)
+  const aG3 = g3.patches.find((p) => p.id === elsG[0].id)
+  ok(aG3.y === 80 && aG3.h === 80, '吸附：第 3 帧容差内微移 → 吸附锁定（面板不动）')
+  const g4 = computeGroupEdgeResize({ elements: elsG2, selectedIds: idsG, zoom: 1 }, Object.assign({}, dragG, { lastDy: g1.appY }), gbG.x, gbG.y - 10)
+  const aG4 = g4.patches.find((p) => p.id === elsG[0].id)
+  ok(aG4.y === 90 && aG4.h === 70, '吸附：移出容差（上边到 90）→ 恢复跟随（y=90, h=70）')
+
+  // r 边多帧吸附（横向对称验证）：右边缘吸附到目标左边缘 420，容差内微移锁定
+  const elsR = [mk(100, 100, 100, 60), mk(250, 100, 100, 60), mk(420, 100, 60, 30)]
+  const idsR = elsR.slice(0, 2).map((e) => e.id)
+  const gbR = groupBounds(elsR, idsR) // 右边缘 350；C 左边缘 420
+  const dragR = { mode: 'groupEdgeResize', side: 'r', sx: gbR.x + gbR.w, sy: gbR.y, gb: gbR }
+  const rR1 = computeGroupEdgeResize({ elements: elsR, selectedIds: idsR, zoom: 1 }, dragR, gbR.x + gbR.w + 67, gbR.y)
+  const aR1 = rR1.patches.find((p) => p.id === elsR[0].id)
+  ok(aR1.w === 170 && rR1.appX === 70, 'r 吸附：第 1 帧右边缘吸附到 420（w=170，appX=70）')
+  const elsR2 = elsR.map((e) => { const p = rR1.patches.find((x) => x.id === e.id); return p ? Object.assign({}, e, p) : e })
+  const rR2 = computeGroupEdgeResize({ elements: elsR2, selectedIds: idsR, zoom: 1 }, Object.assign({}, dragR, { lastDx: rR1.appX }), gbR.x + gbR.w + 69, gbR.y)
+  const aR2 = rR2.patches.find((p) => p.id === elsR[0].id)
+  ok(aR2.w === 170, 'r 吸附：容差内微移 → 锁定（w 不变，不重复修正）')
+
+  // b 边多帧吸附（纵向对称验证）：下边缘吸附到目标上边缘，锁定后不抖动
+  const elsB2 = [mk(100, 100, 100, 60), mk(250, 100, 100, 60), mk(100, 190, 100, 20)]
+  const idsB2 = elsB2.slice(0, 2).map((e) => e.id)
+  const gbB2 = groupBounds(elsB2, idsB2) // 下边缘 160；C 上边缘 190
+  const dragB2 = { mode: 'groupEdgeResize', side: 'b', sx: gbB2.x, sy: gbB2.y + gbB2.h, gb: gbB2 }
+  const bB1 = computeGroupEdgeResize({ elements: elsB2, selectedIds: idsB2, zoom: 1 }, dragB2, gbB2.x, gbB2.y + gbB2.h + 27, gbB2.y)
+  const aB1 = bB1.patches.find((p) => p.id === elsB2[0].id)
+  ok(aB1.h === 90 && bB1.appY === 30, 'b 吸附：第 1 帧下边缘吸附到 190（h=90，appY=30）')
+  const elsB3 = elsB2.map((e) => { const p = bB1.patches.find((x) => x.id === e.id); return p ? Object.assign({}, e, p) : e })
+  const bB2 = computeGroupEdgeResize({ elements: elsB3, selectedIds: idsB2, zoom: 1 }, Object.assign({}, dragB2, { lastDy: bB1.appY }), gbB2.x, gbB2.y + gbB2.h + 28, gbB2.y)
+  const aB2 = bB2.patches.find((p) => p.id === elsB2[0].id)
+  ok(aB2.h === 90, 'b 吸附：容差内微移 → 锁定（h 不变，不重复修正）')
 }
 
 // ---------- 多选外框边手柄命中决策 ----------
