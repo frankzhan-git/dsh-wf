@@ -3,7 +3,7 @@
 import { localStorageAdapter } from '../src/core/storage/adapters/localStorage.js'
 import { indexedDBAdapter } from '../src/core/storage/adapters/indexedDB.js'
 import { hostSQLiteAdapter } from '../src/core/storage/adapters/hostSQLite.js'
-import { hostFileAdapter } from '../src/core/storage/adapters/hostFile.js'
+import { domainAdapter } from '../src/core/storage/adapters/domain.js'
 import { probeAdapters, defaultStore } from '../src/core/storage/index.js'
 
 const mem = new Map()
@@ -29,7 +29,7 @@ section('适配器接口契约')
     ['localStorage', localStorageAdapter()],
     ['indexedDB', indexedDBAdapter()],
     ['hostSQLite', hostSQLiteAdapter()],
-    ['hostFile', hostFileAdapter()],
+    ['domain', domainAdapter()],
   ]
   for (const [name, a] of adapters) {
     ok(a.name === name, name + ': name 正确')
@@ -41,10 +41,10 @@ section('适配器接口契约')
   }
   // 预留标记：未实现适配器 ready=false（安全降级前提）
   ok(indexedDBAdapter().ready === false, 'indexedDB: ready=false（预留未启用）')
-  ok(hostSQLiteAdapter().ready === false, 'hostSQLite: ready=false（宿主 RPC 未上线）')
-  ok(hostFileAdapter(null).ready === false, 'hostFile: 无 rpc → ready=false（未探测到宿主路由）')
-  // hostFile 已实现（S6 宿主半）：rpc 就绪 → ready=true
-  ok(hostFileAdapter({ call: async () => ({ ok: true }) }).ready === true, 'hostFile: rpc 就绪 → ready=true（正式发布形态）')
+  ok(hostSQLiteAdapter().ready === false, 'hostSQLite: ready=false（预留未启用）')
+  ok(domainAdapter(null).ready === false, 'domain: 无 remote → ready=false（未挂载 @Remote 网关）')
+  // domain 已实现（v5 官方存储域）：remote 就绪 → ready=true
+  ok(domainAdapter({ call: async () => ({ ok: true }) }).ready === true, 'domain: remote 就绪 → ready=true（正式发布形态）')
 }
 
 section('能力探测与安全降级')
@@ -52,12 +52,12 @@ section('能力探测与安全降级')
   // 无宿主 RPC → 仅 localStorage 可用
   const list1 = probeAdapters(undefined)
   ok(list1.length === 1 && list1[0].name === 'localStorage', '无宿主 RPC → 仅 localStorage（安全兜底）')
-  // 伪造宿主 RPC（{ call } 形状）→ hostFile 就绪并优先于 localStorage
-  const fakeRpc = {
+  // 伪造 remote（{ call } 形状）→ domain 就绪并优先于 localStorage
+  const fakeRemote = {
     call: async () => ({ ok: true }),
   }
-  const list2 = probeAdapters(fakeRpc)
-  ok(list2.length === 2 && list2[0].name === 'hostFile', '宿主 RPC 就绪 → hostFile 优先（hostSQLite 仍预留）')
+  const list2 = probeAdapters(fakeRemote)
+  ok(list2.length === 2 && list2[0].name === 'domain', 'remote 就绪 → domain 优先（hostSQLite/indexedDB 仍预留）')
   // defaultStore 无参调用（现役路径）返回 localStorage
   const s = defaultStore()
   ok(s.name === 'localStorage' && typeof s.saveMeta === 'function', 'defaultStore() 现役返回 localStorage 适配器')

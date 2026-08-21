@@ -154,7 +154,7 @@ export function useCanvasManager(deps) {
   React.useEffect(() => {
     storeRef.current = defaultStore()
     refreshDocs()
-    // 同步路径（localStorage）未恢复出画布 → 走异步恢复（hostFile 无 sync 变体）
+    // 同步路径（localStorage）未恢复出画布 → 走异步恢复（domain 存储无 sync 变体）
     if (currentIdRef.current === null && lastSavedRef.current === null) restoreLast()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])

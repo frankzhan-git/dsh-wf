@@ -61,9 +61,10 @@ dsh-wf-plugin/                          # 插件仓库（包名 dsh-wf）
 │   │   ├── pipeline.js  prompt.js  store.js
 │   │   └── storage/
 │   │       ├── index.js                # CanvasStore 接口 + 适配器装配（能力探测）
+│   │       ├── remote.js               # 官方 @Remote 接入（contribution + createDomainRemote，S7）
 │   │       ├── schema.js  migrate.js   # 文件 schema 版本 / 迁移链
 │   │       ├── integrity.js            # 损坏隔离 + 结构清洗
-│   │       └── adapters/  localStorage.js  indexedDB.js(预留)  hostSQLite.js(预留)  hostFile.js(预留)
+│   │       └── adapters/  domain.js(现役官方)  localStorage.js(兜底)  indexedDB.js(预留)  hostSQLite.js(预留)
 │   ├── i18n/                           # 文案表（zh 默认，key 化预留多语言；S5）
 │   │   └── index.js                    # t(key, params) + zh 表（toast + 外壳文案）
 │   ├── hooks/                          # 应用层（唯一允许直接持有 elements 状态）
@@ -84,9 +85,16 @@ dsh-wf-plugin/                          # 插件仓库（包名 dsh-wf）
 │   ├── verify-core.mjs  verify-jsonhl.mjs          # 集成（42 断言，保持）
 │   ├── verify-registry.mjs  verify-serializer.mjs
 │   ├── verify-interactions.mjs  verify-storage.mjs  verify-perf.mjs
+│   ├── verify-host-storage.mjs  verify-adapter-contract.mjs
+│   └── smoke-domain.mjs                # 真后端冒烟（cordis + 官方三件套 + 临时目录，S7）
 │
-├── lib/
-│   ├── index.js                        # 宿主入口占位（loader 必需，缺它 DSH 启动崩溃）
+├── lib/                                # 宿主半（Node 进程；官方存储域 + Typert Remote 网关，S7）
+│   ├── index.js                        # Cordis 入口：storageDomain/typert 可选依赖 + provide/bind/register + 迁移
+│   ├── domain.js                       # wf_canvas 领域声明（meta/body 两表 + global；zod schema）
+│   ├── wire.js                         # 线协议单一来源（invocations/descriptors；宿主+client 双端共用）
+│   ├── wf-service.js                   # CanvasStore 契约 → 领域操作（update RMW/损坏隔离/媒体外置）
+│   ├── typert.host.js                  # 宿主线协议贡献（gateway 严格路径）
+│   ├── migrate-legacy.js               # 旧版文件库一次性迁移（~/Documents/界面草图/ → domain）
 │   └── client.js                       # ★ 构建产物（由 build.mjs 生成，不手改）
 │
 └── ARCHITECTURE.md  README.md          # 本蓝本 / 功能演进记录（15–31 节）
@@ -96,16 +104,20 @@ dsh-wf-plugin/                          # 插件仓库（包名 dsh-wf）
 
 ```
 开发：编辑 src/ → npm run build（esbuild，需 danger-full-access 沙箱，否则 spawn EPERM 静默失败）
+依赖：npm install 自动安装官方依赖（@deepseek-ai/dsh-storage-domain、dsh-typert-protocol、zod；
+      版本与 DSH 运行时严格一致，如 0.1.0-rc.7；dsh-storage-json 为 devDependency 供真后端冒烟）
 安装：pnpm link 依赖入 ~/.dsh/profiles/web/package.json
      + junction ~/.dsh/profiles/node_modules/dsh界面草图 → web/node_modules/dsh-wf
      + 配置目录放置 cordis.patch.yml（banner id 必须等于 name: dsh界面草图）
 产物：lib/client.js 经 ModuleLoader.load({ id: 'dsh界面草图', factory }) 注入
+存储：宿主半经 ctx.storageDomain（官方）落 ~/.dsh/storages/wf_canvas.json；
+      旧版 ~/Documents/界面草图/dsh-wf/ 启动时一次性迁移
 ```
 
 ### 1.3 工程约定
 
 - `src/` 是唯一手写源；`lib/client.js` 只由构建生成；`cordis.patch.yml` 只做注册不做逻辑。
-- core 不 import 任何 `@deepseek-ai/*`；允许出现 `@deepseek-ai/*` 的只有 `client.js` 与宿主适配组件（P6）。
+- core 不 import 任何 `@deepseek-ai/*`；允许出现 `@deepseek-ai/*` 的只有 `client.js` 与宿主适配组件（P6）；`lib/wire.js` 只依赖 zod（宿主+client 双端共用的例外）。
 - 每个模块头注释：`职责 / 边界（依赖与禁止）/ 导出清单`。
 - 任何 PR 必须：`npm run verify` 全绿 + 功能对照清单逐项勾选。
 
@@ -290,23 +302,20 @@ interface CanvasFileMeta { id: string; name: string; schemaVersion: number; crea
 | 元素 > 5000 或含媒体 | IndexedDB/宿主存储：增量 + 媒体外置 + body 分块 | 分块实现留到真实需要时（接口已支持） |
 | 画布数百份 | 宿主 SQLite（索引/检索/统计）或 listMeta 分页 + keyword | 列表不触 body；跨画布需求走 SQL |
 
-### 4.3 四级存储适配器（发布演进路线，写粒度随能力退化）
+### 4.3 存储适配器（S7 定稿：官方存储域现役）
 
 | 适配器 | 载体 | 状态 | 写粒度 | 说明 |
 | --- | --- | --- | --- | --- |
-| `localStorageAdapter` | `dsh-wf:index` / `dsh-wf:body:{id}` / `dsh-wf:media:{id}:{key}` / `dsh-wf:last` | **现役（默认）** | 全量退化（量小无感） | 容量探测（~5MB），超限 toast + 引导导出；启动即迁移旧 `dsh-wf:history` 键；媒体存 dataURL，超限拒绝并提示 |
-| `indexedDBAdapter` | DB `dsh-wf`：store `meta` / `body` / `media`(blob) | 预留 | 增量 patch | 事务批量；body 单条全量 JSON，量大再分块；浏览器端正解（原生、异步、按 key 索引），**不引入 WASM SQLite**（包体/兼容性代价 vs 无 SQL 需求） |
-| `hostSQLiteAdapter` | 宿主 RPC（自建 webServer 路由）→ `<DSH 数据目录>/dsh-wf/dsh-wf.db`（WAL 模式） | **预留（正式发布推荐）** | 增量 patch（事务） | **DSH 宿主无内置 storage.\* 服务**：需宿主半实现 `webServer.register` 注册路由（参考 dsh-fm `/api/fm` 模式：`inject: ['fs','webServer']`，client `fetch` 调用），用 DSH 的 `fs` 服务落盘（better-sqlite3 或 node:sqlite）；事务 + WAL 崩溃安全、索引查询、单文件备份 |
-| `hostFileAdapter` | 宿主 RPC（同上）→ `<DSH 数据目录>/dsh-wf/canvases/{cid}/`{meta.json, body.json, media/{key}} + index.json | 预留（备选） | 增量 patch（合并写 body.json） | 同上（自建路由 + fs 服务）；JSON 目录人类可读、可 git 管理；与 SQLite 同为适配器，按规模/偏好切换 |
+| `domainAdapter` | 官方 `ctx.storageDomain`（JSON 后端）→ `~/.dsh/storages/wf_canvas.json`（meta/body 两表 + global）+ 媒体 `wf-media/{cid}/{key}` | **现役（官方存储，S7）** | 官方原子写（临时文件 + fsync + rename）+ `update()` 原子 RMW | 传输经官方 api-gateway（@Remote，zod 线协议校验）；单写链串行；损坏 `malformed-medium` → `.corrupt` 隔离重开空库；无 100 条索引上限 |
+| `localStorageAdapter` | `dsh-wf:index` / `dsh-wf:body:{id}` / `dsh-wf:media:{id}:{key}` / `dsh-wf:last` | 兜底（官方存储域不可用时） | 全量退化（量小无感） | 容量探测（~5MB），超限 toast + 引导导出；启动即迁移旧 `dsh-wf:history` 键；媒体存 dataURL，超限拒绝并提示 |
+| `indexedDBAdapter` | DB `dsh-wf`：store `meta` / `body` / `media`(blob) | 预留 | 增量 patch | 浏览器端正解（原生、异步、按 key 索引），**不引入 WASM SQLite**（包体/兼容性代价 vs 无 SQL 需求） |
+| `hostSQLiteAdapter` | 官方 `sqlite` 后端（roadmap 未发布） | 预留 | 增量 patch（事务） | 官方路线图：`sqlite` 后端与 `json` 并排挂载，**CanvasStore 接口不变仅换后端路由**；规模边界见 4.2 表 |
 
-> 正式发布形态：宿主端以 **SQLite 单文件（WAL）为主存储**，浏览器存储（IndexedDB/localStorage）仅作离线缓存降级；
-> 人类可读/可迁移由 CanvasFile JSON 导出承担（导出/导入/备份载体）。切换标准：画布数百份以上、需跨画布检索/统计、需事务级并发安全时启用 SQLite；规模小且偏好可读数据时用 JSON 目录。客户端画板始终不引入 WASM SQLite。
+> **v5 事实核查（S7，2026）**：DSH 0.1.0-rc.7 已内置官方存储三件套（`dsh-storage` 中枢 + `dsh-storage-json` 后端 + `dsh-storage-domain` 领域层），web profile 默认挂载（`~/.dsh/storages/`）。
+> 官方范式（`dsh-message-feedback` 同构）：宿主半 `TypertRemoteService`/`bindTypertRemote` + `ctx.typert.register`（严格描述符，zod 线协议校验）+ 客户端 `ctx.remote.$mount`（公开运行时 API，第三方 bundle 无需改官方装配）。
+> 自建 webServer 路由 + 文件库（`lib/wf-storage.js`、`src/core/storage/rpc.js`、`hostFileAdapter`）**已删除**（S7）；shell 删除依赖清零。
 >
-> **宿主 RPC 事实核查（2025 查证 dsh-fm-plugin）**：DSH 宿主**不提供内置 `storage.*` 服务**；提供的是 `fs` / `shell` / `sandboxPolicy` / `sessions` / `webServer`（Cordis 服务）。
-> 成熟模式 = 宿主半实现自建路由（`webServer.register({ path: '/api/wf-storage', handler })`，`inject: ['fs','webServer']`）+ client `fetch` 封装（POST JSON `{ method, args }` → `{ ok, ... }`），
-> 与 dsh-fm `/api/fm`、dsh-kb 完全同构。hostSQLite/hostFile 适配器的 `rpc` 参数即此 fetch 封装。
->
-> **宿主半已实现（S6 追加）**：`lib/index.js`（正式入口：inject `['fs','shell','webServer']` + `/api/wf-storage` 路由 + `~/.dsh/wf/config.json` 可配根目录，默认 `~/Documents/界面草图/`）+ `lib/wf-storage.js`（画布库文件存储：index.json 聚合 + `canvases/{cid}/`{meta.json, body.json, media/}；损坏隔离 `.corrupt` + index 扫描重建；删除经 shell；媒体经 node:fs 注入化）。client 侧 `src/core/storage/rpc.js`（createHostRpc/probeHostRpc 同步探测）+ `hostFileAdapter` 全功能实现（rpc 转发），`src/client.js` apply 时探测 → `defaultStore(hostRpc)` 自动升级。verify-host-storage 26 断言守护。
+> **宿主半已实现（S7 定稿）**：`lib/index.js`（可选依赖 `storageDomain`/`typert`；`ctx.provide('wfStorage')` + `bindTypertRemote` + `typert.register(TYPERT_HOST)` + `ctx.effect` 生命周期）+ `lib/domain.js`（wf_canvas 领域声明）+ `lib/wf-service.js`（CanvasStore 契约 → 领域操作：update RMW、损坏隔离、媒体外置 node:fs）+ `lib/migrate-legacy.js`（旧 `~/Documents/界面草图/dsh-wf/` 一次性迁移，只入不覆盖，成功改名 `.migrated`）。client 侧 `src/core/storage/remote.js`（`wfRemoteContribution` + `createDomainRemote`）+ `domainAdapter`，`src/client.js` apply 时 `await remote.$mount` → `defaultStore(createDomainRemote(remote))` 自动升级。verify-host-storage 30+ 断言 + smoke-domain.mjs 真后端冒烟守护。
 
 ### 4.4 Schema 版本与迁移（schema.js / migrate.js）
 
@@ -314,14 +323,14 @@ interface CanvasFileMeta { id: string; name: string; schemaVersion: number; crea
 - 升级规则：缺字段补默认值；未知字段**保留**（前向兼容，导出不丢数据）。
 - 写回时总是最新版本。
 
-### 4.5 完整性与恢复（integrity.js，P5）
+### 4.5 完整性与恢复（integrity.js + 官方后端，P5）
 
 | 场景 | 处理 |
 | --- | --- |
-| JSON.parse 失败 | 原文件改名 `.corrupt` 隔离 → 返回 null → toast「画布文件损坏，已隔离」 |
-| 元素结构非法 | `sanitizeBody` 逐元素校验，非法元素丢弃并计数上报 |
-| 崩溃恢复 | 打开时若存在「上次未正常关闭」标记 → 提示恢复最近自动保存 |
-| 自动保存 | 800ms 防抖 + 关闭 flushSave + **增量 patch**；dirty 集合由 useSketchState 收集，提交由 useStorage 执行 |
+| 单位文件损坏 | 官方 open 抛 `malformed-medium` → 宿主半改名 `.corrupt` 隔离 → 重开空库（业务不崩，降级/提示） |
+| 元素结构非法 | `sanitizeElements` 逐元素校验（宿主读时），非法元素丢弃并计数上报 |
+| 崩溃恢复 | 官方原子写保证文件恒完整；打开时若存在「上次未正常关闭」标记 → 提示恢复最近自动保存 |
+| 自动保存 | 800ms 防抖 + 关闭 flushSave + 串行队列全量快照（client）+ 官方单写链 `update()` RMW（宿主） |
 
 ### 4.6 导出 / 导入（文档管理的一部分）
 
@@ -468,13 +477,14 @@ clampPages(nx, ny, el, others, GAP=16) → { x, y }   // 页面间距逐轴钳�
 | prompt.js | `buildInsertText(jsonl)`、`STANDARD_NOTE` | 提示词 |
 | store.js | `store`、`subscribe(fn)`、`setOpen(open)` | 画板开关 |
 | storage/index.js | `CanvasStore` 文档库接口（meta/body/media/patch）、`probeAdapters()`、`defaultStore()` | 存储装配（P7），业务只认此接口 |
+| storage/remote.js | `wfRemoteContribution`、`createDomainRemote(remote)` | 官方 @Remote 接入（S7）：$mount 挂载 + 信封解析 |
 | storage/schema.js | `CURRENT_SCHEMA_VERSION`、`newCanvasFile(name)` | 版本常量 + 画布工厂 |
 | storage/migrate.js | `migrateFile(raw)` | 版本链迁移 |
-| storage/integrity.js | `sanitizeBody(raw)`、`quarantine(raw, store)` | 损坏隔离 + 结构清洗 |
-| storage/adapters/localStorage.js | `localStorageAdapter()` | 现役适配器（全量退化 + 容量探测 + sync 变体 + 旧键迁移） |
+| storage/integrity.js | `sanitizeElements(raw)`、`isValidMeta(m)` | 结构清洗 + meta 合法性（损坏隔离由官方后端 + 宿主半承担） |
+| storage/adapters/domain.js | `domainAdapter(remote)` | **现役官方适配器（S7）**：CanvasStore 契约 → remote.wfStorage |
+| storage/adapters/localStorage.js | `localStorageAdapter()` | 兜底适配器（全量退化 + 容量探测 + sync 变体 + 旧键迁移） |
 | storage/adapters/indexedDB.js | `indexedDBAdapter()` | 预留（meta/body/media 三 store，增量） |
-| storage/adapters/hostSQLite.js | `hostSQLiteAdapter(rpc)` | 预留（正式发布推荐：WAL 单文件，事务增量） |
-| storage/adapters/hostFile.js | `hostFileAdapter(rpc)` | 预留（备选：目录式 JSON，可读可 git） |
+| storage/adapters/hostSQLite.js | `hostSQLiteAdapter()` | 预留（官方 sqlite 后端 roadmap；CanvasStore 接口不变） |
 
 ### 7.2 hooks/（6 文件）
 
@@ -550,17 +560,17 @@ base / canvas / inspector / history / preview + index 聚合（顺序 = 优先�
 
 ## 第 10 章 实施计划（行为不变，每阶段回归全绿）
 
-> 进度：S1 ✅｜ S2 ✅｜ S3 ✅｜ S4 ✅｜ S5 ✅｜ **S6 ✅ 全部完成**
+> 进度：S1 ✅｜ S2 ✅｜ S3 ✅｜ S4 ✅｜ S5 ✅｜ S6 ✅｜ **S7 ✅ 全部完成**
 
 | 阶段 | 交付 | 验收 | 状态 |
 | --- | --- | --- | --- |
 | S1 注册表 + 序列化 | core/types.js + jsonl/{props,serializer,validator,prettify}.js + pipeline.js；build.js/jsonHighlight.js 转转发层 | verify-registry/serializer 全绿 + 42 断言全绿 | ✅ 完成 |
 | S2 状态机 + hooks 拆分 | core/interactions.js（decide/update/settle 纯函数）+ useSketchState/useCanvasInteractions/useCanvasEdit/useToasts/useCanvasManager 5 个新 hook + SketchModal 瘦身（842→330 行）+ 适配层桥接 output.emit → setDraft（保留 inputActions.setDraft 调用） | verify-interactions 全绿（29 断言）+ 全部旧验证全绿 + 构建成功 | ✅ 完成 |
 | S3 渲染拆分 | canvas/{NodeRenderer(17 形态),SelectionOverlay,SnapLines,CanvasStage 瘦身 257→84} + inspector/{PropField(注册表驱动),InspectorPanel 字段配置化} + typeLabels 派生化 | 构建成功 + 全验证绿 + grep 审计：子组件零业务逻辑 | ✅ 完成 |
-| S3 渲染拆分 | canvas/{NodeRenderer(17 形态),SelectionOverlay,SnapLines,CanvasStage 瘦身 257→84} + inspector/{PropField(注册表驱动),InspectorPanel 字段配置化} + typeLabels 派生化 | 构建成功 + 全验证绿 + grep 审计：子组件零业务逻辑 | ✅ 完成 |
 | S4 存储与文档管理 | core/storage/*（schema/migrate/integrity + localStorage 适配器 + 装配 index）+ useCanvasManager 存储化（dirty 增量管线 + 异步 docs 列表）+ DocumentPanel（重命名/导出/导入）+ 旧键自动迁移 | verify-storage 全绿（32 断言）；重开画布/损坏隔离/增量保存/导出导入手工对照 | ✅ 完成 |
 | S5 宿主层收口 | 转发层删除（build/jsonHighlight/history → 直连 pipeline/prettify/内联）+ typeLabels/Toast 迁 common/ + CanvasOverlay·preview 目录对齐 + i18n 文案 key 化（src/i18n/，toast+外壳文案）+ P6 三层审计（core 零 DSH / @deepseek-ai 仅图标 / 宿主 props 仅 SketchModal 注入）+ verify-perf | 7 套验证全绿；审计通过；构建成功（147KB） | ✅ 完成 |
 | S6 发布就绪 | indexedDB/hostSQLite/hostFile 适配器桩 + probeAdapters 能力探测（安全降级）+ verify-adapter-contract（契约形状/预留标记/降级）+ schema.json 一致性强化（props 字段）+ README 架构总览与发布 checklist + package.json verify 一键脚本 | 8 套验证全绿（180+ 断言）+ 构建成功 + 发布 checklist 全项可勾选 | ✅ 完成 |
+| S7 官方存储域（v5 定稿） | 存储内核迁官方 `ctx.storageDomain`（lib/{domain,wire,wf-service,typert.host,migrate-legacy}.js）+ 传输迁官方 @Remote 网关（ctx.provide + bindTypertRemote + typert.register；client remote.$mount）+ `domainAdapter` 现役（rpc.js/hostFile.js/wf-storage.js 删除，shell 依赖清零）+ 旧文件库一次性迁移 + 依赖锁定 rc.7 | 10 套验证全绿 + smoke-domain.mjs 真后端冒烟（原子写单位文件/损坏隔离/级联删除）+ 构建成功 | ✅ 完成 |
 
 ---
 
@@ -578,7 +588,7 @@ base / canvas / inspector / history / preview + index 聚合（顺序 = 优先�
 
 ---
 
-## 实施完成记录（S1–S6 全部完成）
+## 实施完成记录（S1–S7 全部完成）
 
 | 阶段 | 结果 |
 | --- | --- |
@@ -588,3 +598,4 @@ base / canvas / inspector / history / preview + index 聚合（顺序 = 优先�
 | S4 存储与文档 | storage 六件套 + dirty 增量管线 + DocumentPanel（重命名/导出/导入）；verify-storage 32 断言；旧键自动迁移 |
 | S5 宿主层收口 | 转发层全删 + i18n + P6 三层审计 + verify-perf（管线 4.4ms/往返 1.4ms/增量 0.8ms） |
 | S6 发布就绪 | 三级适配器桩 + probeAdapters 安全降级 + 契约验证 + README 架构总览/发布 checklist + `npm run verify` 一键 180+ 断言全绿 |
+| S7 官方存储域（v5 定稿） | 官方 storage-domain 内核（wf_canvas 领域 + update RMW + 损坏隔离）+ @Remote 网关传输（typert 严格路径 + remote.$mount）+ domainAdapter 现役 + 旧数据迁移 + 依赖锁定 rc.7；10 套验证全绿 + 真后端冒烟 OK |

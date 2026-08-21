@@ -1,5 +1,18 @@
 # 更新日志
 
+## v2.0.0（2026）
+
+### 存储架构 v5 定稿：官方存储域 + @Remote 网关
+
+- **存储内核迁移官方 `ctx.storageDomain`**：数据落 `~/.dsh/storages/wf_canvas.json`（JSON 后端原子写：临时文件 + fsync + rename），meta/body 两表 + global；`saveBody` 增量 patch 映射 `table.update()` 原子 RMW；单写链串行化
+- **传输层迁移官方 api-gateway**：宿主半 `ctx.provide('wfStorage')` + `bindTypertRemote` + `ctx.typert.register`（严格描述符，zod 线协议校验）；客户端 `ctx.remote.$mount` 挂载 `remote.wfStorage`（公开运行时 API，无需改官方装配）
+- **删除全部自建存储基础设施**：`lib/wf-storage.js`（自管文件库）、`/api/wf-storage` 路由、`src/core/storage/rpc.js`（同步 XHR 探测）、`hostFileAdapter`、shell 删除依赖、`~/.dsh/wf/config.json` 逻辑
+- **`domainAdapter` 现役**：CanvasStore 接口与业务层（hooks/components）零改动；探测链 `domain > indexedDB > localStorage`
+- **旧数据一次性迁移**：v4 文件库（`~/Documents/界面草图/dsh-wf/`）启动时自动迁移（只入不覆盖，成功改名 `.migrated`）
+- **损坏容错升级**：官方 `malformed-medium` 拒绝 → `.corrupt` 隔离重开空库；修复 index 100 条隐藏上限
+- 依赖：`@deepseek-ai/dsh-storage-domain` / `dsh-typert-protocol` / `zod`（版本与 DSH 运行时严格一致 rc.7）；`dsh-storage-json` 为 devDependency（真后端冒烟）
+- 验证：10 套全绿 + `scripts/smoke-domain.mjs` 真后端冒烟（原子写单位文件 / 损坏隔离 / 级联删除）
+
 ## v1.1.0（2026-08）
 
 ### 设计哲学：结构陈述而非高保真

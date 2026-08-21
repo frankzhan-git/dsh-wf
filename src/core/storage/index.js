@@ -1,10 +1,10 @@
 // 存储装配（P7）：业务只认 CanvasStore 接口，不认存储实现
-// probeAdapters 能力探测按优先级选优：hostSQLite > hostFile > indexedDB > localStorage
+// probeAdapters 能力探测按优先级选优：domain（官方存储域 @Remote）> indexedDB > localStorage
 // 现役：localStorageAdapter（同步变体供初始化）；预留适配器 ready=false 时安全降级，业务零改动
 import { localStorageAdapter } from './adapters/localStorage.js'
 import { indexedDBAdapter } from './adapters/indexedDB.js'
 import { hostSQLiteAdapter } from './adapters/hostSQLite.js'
-import { hostFileAdapter } from './adapters/hostFile.js'
+import { domainAdapter } from './adapters/domain.js'
 import { migrateFile } from './migrate.js'
 import { CURRENT_SCHEMA_VERSION, genCanvasId } from './schema.js'
 
@@ -13,21 +13,24 @@ export { migrateFile } from './migrate.js'
 export { sanitizeElements } from './integrity.js'
 
 // 能力探测：返回按优先级排序的可用适配器列表（仅 ready 者）
-// hostRpc：宿主侧存储服务（createHostRpc 的 fetch 封装；由 src/client.js 适配层探测注入）
-export function probeAdapters(hostRpc) {
+// remote：官方 @Remote 网关封装（createDomainRemote 的 { call } 形状；由 src/client.js 适配层挂载注入）
+export function probeAdapters(remote) {
   const available = []
-  for (const c of [hostSQLiteAdapter(hostRpc), hostFileAdapter(hostRpc), indexedDBAdapter()]) {
-    if (c.ready) available.push(c)
-  }
+  const d = domainAdapter(remote)
+  if (d.ready) available.push(d)
+  const idx = indexedDBAdapter()
+  if (idx.ready) available.push(idx)
+  const sql = hostSQLiteAdapter()
+  if (sql.ready) available.push(sql)
   available.push(localStorageAdapter()) // localStorage 永远兜底
   return available
 }
 
 let cached = null
 // 默认存储（单例；选中 localStorage 时自动执行旧键迁移）
-export function defaultStore(hostRpc) {
+export function defaultStore(remote) {
   if (cached) return cached
-  cached = probeAdapters(hostRpc)[0]
+  cached = probeAdapters(remote)[0]
   if (cached.name === 'localStorage') cached.migrateLegacy().catch(() => {})
   return cached
 }
