@@ -1,8 +1,8 @@
-// 验证脚本：宿主存储半（v5 官方存储域）——wf-service 工厂 + 内存 domain + 损坏隔离 + 迁移
+// 验证脚本：宿主存储半（v2.1 目录文件介质）——wf-service 工厂 + 内存 fs + 损坏隔离 + 迁移
 // 用法：node scripts/verify-host-storage.mjs
-// 宿主半用注入式依赖（{ storageDomain, mediaRoot, mediaFs }）：这里用内存 domain + 内存 mediaFs 全流程测试，
-// 不依赖 Cordis 运行时（真实装配由 lib/index.js 承担，经官方 storage-domain 后端验证过）
-import { createWfService } from '../lib/wf-service.js'
+// 宿主半用注入式依赖（{ storagesRoot, mediaRoot, fsImpl }）：这里用内存 fs 全流程测试，
+// 不依赖 Cordis 运行时（真实装配由 lib/index.js 承担，真 fs 冒烟见 scripts/smoke-storage.mjs）
+import { createWfService, migrateDomainFile } from '../lib/wf-service.js'
 import { migrateLegacy } from '../lib/migrate-legacy.js'
 import { domainAdapter } from '../src/core/storage/adapters/domain.js'
 import { probeAdapters, defaultStore } from '../src/core/storage/index.js'
@@ -11,73 +11,40 @@ import { createElement } from '../src/core/model.js'
 const ok = (cond, name) => { console.log((cond ? 'PASS' : 'FAIL') + ' ' + name); if (!cond) process.exitCode = 1 }
 const section = (t) => console.log('\n=== ' + t + ' ===')
 
-// ---------- 内存 domain（形状同 storage-domain 的 Domain/Table） ----------
-function createMemTable() {
-  const map = new Map()
-  return {
-    get: (k) => map.get(k),
-    put: async (k, v) => { map.set(k, v) },
-    delete: async (k) => { const had = map.has(k); map.delete(k); return had },
-    update: async (k, fn) => {
-      if (!map.has(k)) throw new Error('missing-key')
-      const next = fn(map.get(k))
-      map.set(k, next)
-      return next
-    },
-    entries: () => map.entries(),
-    keys: () => map.keys(),
-    get size() { return map.size },
-    _map: map,
-  }
-}
-function createMemDomain(spec) {
-  const tables = {}
-  for (const name of Object.keys(spec.tables)) tables[name] = createMemTable()
-  return {
-    name: spec.name,
-    table: (name) => tables[name],
-    close: async () => {},
-  }
-}
-// 内存 storageDomain：可注入「首次 open 抛错」（损坏隔离场景）
-function createMemStorageDomain({ failFirstOpen = null } = {}) {
-  let opens = 0
-  return {
-    open: async (spec) => {
-      opens++
-      if (failFirstOpen && opens === 1) {
-        const e = new Error(failFirstOpen)
-        e.code = failFirstOpen
-        throw e
-      }
-      return createMemDomain(spec)
-    },
-    get opens() { return opens },
-  }
-}
-// 内存 mediaFs（形状同 node:fs/promises 子集 + rename + mkdir）
-function createMemMediaFs() {
-  const files = new Map()
+// ---------- 内存文件系统（形状同 node:fs/promises 子集 + writeAtomic） ----------
+const norm = (p) => String(p).replace(/\\/g, '/')
+function createMemFs() {
+  const files = new Map() // norm(path) → string（文本）或 Buffer（二进制）
   return {
     files,
     mkdir: async () => {},
-    writeFile: async (p, buf) => { files.set(String(p).replace(/\\/g, '/'), Buffer.from(buf)) },
+    writeFile: async (p, content) => { files.set(norm(p), Buffer.isBuffer(content) ? Buffer.from(content) : String(content)) },
     readFile: async (p) => {
-      const v = files.get(String(p).replace(/\\/g, '/'))
+      const v = files.get(norm(p))
       if (v === undefined) { const e = new Error('ENOENT'); e.code = 'ENOENT'; throw e }
       return v
     },
+    rename: async (a, b) => {
+      const v = files.get(norm(a))
+      if (v === undefined) throw new Error('ENOENT')
+      files.delete(norm(a)); files.set(norm(b), v)
+    },
     rm: async (p, opts) => {
-      const prefix = String(p).replace(/\\/g, '/')
+      const prefix = norm(p)
       for (const k of Array.from(files.keys())) if (k === prefix || k.startsWith(prefix + '/')) files.delete(k)
     },
-    rename: async (a, b) => {
-      const old = String(a).replace(/\\/g, '/')
-      const v = files.get(old)
-      if (v === undefined) throw new Error('ENOENT')
-      files.delete(old)
-      files.set(String(b).replace(/\\/g, '/'), v)
+    readdir: async (p) => {
+      const prefix = norm(p)
+      const out = []
+      for (const k of files.keys()) {
+        if (k.startsWith(prefix + '/')) {
+          const name = k.slice(prefix.length + 1)
+          if (!name.includes('/')) out.push(name)
+        }
+      }
+      return out
     },
+    writeAtomic: async (p, data) => { files.set(norm(p), JSON.stringify(data, null, 2)) },
   }
 }
 // 内存 localStorage（defaultStore 探测用）
@@ -92,19 +59,21 @@ globalThis.localStorage = {
 
 const mkEl = (x, y, w, h, type) => Object.assign(createElement({ kind: 'rect', type: type || null }, x, y, w, h), {})
 const now = () => new Date().toISOString()
+const ROOT = '/storages'
+const MEDIA = '/storages/wf-media'
 
-// ---------- 宿主半全流程（内存 domain） ----------
-section('wf-service 宿主半（官方存储域）：画布库全流程')
+// ---------- 宿主半全流程（目录文件介质） ----------
+section('wf-service 宿主半（目录文件）：画布库全流程')
 {
-  const mediaFs = createMemMediaFs()
-  const service = await createWfService({ storageDomain: createMemStorageDomain(), mediaRoot: '/media', unitPath: '/media/wf_canvas.json', mediaFs })
+  const fs = createMemFs()
+  const service = await createWfService({ storagesRoot: ROOT, mediaRoot: MEDIA, fsImpl: fs })
 
   const id = 'host-1'
   const elA = mkEl(20, 20, 200, 60, 'button')
   elA.text = '登录'
 
   const r0 = await service.ping()
-  ok(r0.ok === true && r0.storage === 'domain', 'ping：存储域就绪')
+  ok(r0.ok === true && r0.storage === 'files', 'ping：目录文件存储就绪')
 
   await service.saveMeta({ id, name: '宿主画布', schemaVersion: 1, createdAt: now(), updatedAt: now(), elementCount: 1, hasMedia: false })
   const m1 = await service.getMeta(id)
@@ -114,13 +83,13 @@ section('wf-service 宿主半（官方存储域）：画布库全流程')
   const b1 = await service.loadBody(id)
   ok(b1.ok && b1.body.elements.length === 1 && b1.body.elements[0].text === '登录', 'saveBody → loadBody 往返')
 
-  // 首次保存（body 缺失 → 以 patch 为全量）+ 增量 patch（set 覆盖 + remove 删除）
+  // 增量 patch：set 覆盖 + remove 删除（宿主侧读-改-写串行）
   const elA2 = Object.assign({}, elA, { text: '改名' })
   const elB = mkEl(40, 80, 100, 30)
   await service.saveBody(id, { set: { [elA2.id]: elA2, [elB.id]: elB }, remove: [] })
   await service.saveBody(id, { set: {}, remove: [elB.id] })
   const b2 = await service.loadBody(id)
-  ok(b2.ok && b2.body.elements.length === 1 && b2.body.elements[0].text === '改名', '增量 patch：set 覆盖 + remove 删除（update RMW）')
+  ok(b2.ok && b2.body.elements.length === 1 && b2.body.elements[0].text === '改名', '增量 patch：set 覆盖 + remove 删除')
 
   // listMeta 分页 + keyword + 倒序
   await service.saveMeta({ id: 'host-2', name: '第二张', schemaVersion: 1, createdAt: now(), updatedAt: new Date(Date.now() + 1000).toISOString(), elementCount: 0, hasMedia: false })
@@ -134,11 +103,12 @@ section('wf-service 宿主半（官方存储域）：画布库全流程')
   const g = await service.getMedia({ id, key: 'pic.png' })
   ok(g.ok && g.media && Buffer.from(g.media.base64, 'base64').toString() === 'hello-media', '媒体 base64 往返（外置文件）')
 
-  // 删除级联（body → meta → 媒体目录）
+  // 删除级联（画布文件 + 媒体目录）
   await service.remove(id)
   const after = await service.listMeta({})
-  ok(after.ok && after.total === 1 && !after.items.some((m) => m.id === id), 'remove：meta/body 删除 + 媒体清理')
-  ok(!mediaFs.files.has('/media/' + id + '/pic.png'), 'remove：媒体文件已清理')
+  ok(after.ok && after.total === 1 && !after.items.some((m) => m.id === id), 'remove：画布文件删除 + 媒体清理')
+  ok(!fs.files.has('/storages/wf-canvases/' + id + '.json'), 'remove：画布 JSON 已删除')
+  ok(!fs.files.has('/storages/wf-media/' + id + '/pic.png'), 'remove：媒体文件已清理')
 
   // clear
   await service.clear()
@@ -146,27 +116,91 @@ section('wf-service 宿主半（官方存储域）：画布库全流程')
   ok(cleared.ok && cleared.total === 0, 'clear：清空全部')
 
   await service.close()
-  ok(true, 'close：幂等释放领域')
+  ok(true, 'close：幂等释放')
 }
 
-// ---------- 损坏隔离（malformed-medium → .corrupt → 重开空库） ----------
-section('损坏隔离（P5）')
+// ---------- 文件布局（每画布一个 JSON，目录归类） ----------
+section('文件布局（每画布一个 JSON + 目录归类）')
 {
-  const mediaFs = createMemMediaFs()
-  mediaFs.files.set('/media/wf_canvas.json', Buffer.from('{broken'))
-  const sd = createMemStorageDomain({ failFirstOpen: 'malformed-medium' })
-  const service = await createWfService({ storageDomain: sd, mediaRoot: '/media', unitPath: '/media/wf_canvas.json', mediaFs })
-  ok(sd.opens === 2, 'open 失败 → 隔离后重开（两次 open）')
-  ok(!mediaFs.files.has('/media/wf_canvas.json') && mediaFs.files.has('/media/wf_canvas.json.corrupt'), '损坏单位文件改名 .corrupt 隔离')
-  const l = await service.listMeta({})
-  ok(l.ok && l.total === 0, '隔离后空库可用（业务不崩）')
+  const fs = createMemFs()
+  const service = await createWfService({ storagesRoot: ROOT, mediaRoot: MEDIA, fsImpl: fs })
+  const id = 'layout-1'
+  const el = mkEl(10, 10, 100, 40, 'text')
+  el.text = '布局'
+  await service.saveMeta({ id, name: '布局画布', schemaVersion: 1, createdAt: now(), updatedAt: now(), elementCount: 1, hasMedia: false })
+  await service.saveBody(id, { set: { [el.id]: el }, remove: [] })
+  const keys = Array.from(fs.files.keys())
+  ok(keys.includes('/storages/wf-canvases/' + id + '.json'), 'wf-canvases/{id}.json 存在（每画布一文件）')
+  ok(!keys.some((k) => /wf_canvas\.json$/.test(k)), '官方域单位文件不存在（介质已切换）')
+  const file = JSON.parse(fs.files.get('/storages/wf-canvases/' + id + '.json'))
+  ok(file.id === id && file.name === '布局画布' && file.elements.length === 1 && file.elementCount === 1,
+    '画布文件为 CanvasFile 完整形态（meta + elements 合一）')
+  console.log('  布局示例：')
+  for (const k of keys) console.log('    ' + k)
   await service.close()
 }
 
-// ---------- 旧数据一次性迁移（v4 文件库 → domain） ----------
-section('旧数据迁移（~/Documents/界面草图 → domain）')
+// ---------- 损坏隔离（.corrupt） ----------
+section('损坏隔离（P5）')
 {
-  const { mkdir, writeFile } = await import('node:fs/promises')
+  const fs = createMemFs()
+  const service = await createWfService({ storagesRoot: ROOT, mediaRoot: MEDIA, fsImpl: fs })
+  const id = 'corrupt-1'
+  await service.saveMeta({ id, name: '损坏测试', schemaVersion: 1, createdAt: now(), updatedAt: now(), elementCount: 0, hasMedia: false })
+  fs.files.set('/storages/wf-canvases/' + id + '.json', '{broken')   // 写坏
+  const b = await service.loadBody(id)
+  ok(b.ok && b.body === null, '损坏文件 → 返回 null（不抛）')
+  ok(fs.files.has('/storages/wf-canvases/' + id + '.json.corrupt'), '损坏文件改名 .corrupt 隔离')
+  const l = await service.listMeta({})
+  ok(l.ok && l.total === 0, '隔离后缓存剔除（列表不出现损坏画布）')
+  await service.close()
+}
+
+// ---------- 迁移：官方域单位文件（wf_canvas.json）→ 每画布文件 ----------
+section('迁移：官方域单位文件 → wf-canvases/')
+{
+  const fs = createMemFs()
+  // 构造旧官方域文件（unit+tables 格式）
+  const oldId1 = 'old-1'
+  const oldId2 = 'old-2'
+  fs.files.set('/storages/wf_canvas.json', JSON.stringify({
+    unit: { name: 'wf_canvas', version: 1 },
+    global: { lastCanvasId: null },
+    tables: {
+      meta: {
+        [oldId1]: { id: oldId1, name: '旧画布一', schemaVersion: 1, createdAt: now(), updatedAt: now(), elementCount: 1, hasMedia: false },
+        [oldId2]: { id: oldId2, name: '旧画布二', schemaVersion: 1, createdAt: now(), updatedAt: now(), elementCount: 0, hasMedia: false },
+      },
+      body: {
+        [oldId1]: { schemaVersion: 1, elements: [Object.assign(mkEl(5, 5, 50, 20, 'button'), { text: '旧按钮' })] },
+      },
+    },
+  }))
+  const service = await createWfService({ storagesRoot: ROOT, mediaRoot: MEDIA, fsImpl: fs })
+  const meta1 = await service.getMeta(oldId1)
+  const meta2 = await service.getMeta(oldId2)
+  ok(meta1.ok && meta1.meta && meta1.meta.name === '旧画布一', '迁移：画布一 meta 就绪')
+  ok(meta2.ok && meta2.meta && meta2.meta.name === '旧画布二', '迁移：画布二 meta 就绪')
+  const body = await service.loadBody(oldId1)
+  ok(body.ok && body.body.elements.length === 1 && body.body.elements[0].text === '旧按钮', '迁移：elements 拆入独立文件')
+  ok(fs.files.has('/storages/wf-canvases/' + oldId1 + '.json') && fs.files.has('/storages/wf-canvases/' + oldId2 + '.json'), '迁移：每画布文件已生成')
+  ok(fs.files.has('/storages/wf_canvas.json.migrated'), '迁移成功 → 旧单位文件改名 .migrated')
+  // 只入不覆盖：构造另一份旧文件（含同名画布）→ 跳过已有
+  fs.files.set('/storages/wf_canvas.json', JSON.stringify({
+    unit: { name: 'wf_canvas', version: 1 },
+    tables: { meta: { [oldId1]: { id: oldId1, name: '改名？', schemaVersion: 1, createdAt: now(), updatedAt: now(), elementCount: 0, hasMedia: false } }, body: {} },
+  }))
+  const r2 = await migrateDomainFile(fs, ROOT, '/storages/wf-canvases')
+  ok(r2.migrated === 0 && r2.skipped === 1, '迁移：只入不覆盖（已有画布跳过）')
+  const m1again = await service.getMeta(oldId1)
+  ok(m1again.ok && m1again.meta.name === '旧画布一', '跳过不覆盖：已有画布内容不变')
+  await service.close()
+}
+
+// ---------- 旧数据一次性迁移（v4 文件库 → 目录文件） ----------
+section('旧数据迁移（v4 文件库 → wf-canvases/）')
+{
+  const { mkdir, writeFile, stat, rm } = await import('node:fs/promises')
   const { join } = await import('node:path')
   const { tmpdir } = await import('node:os')
   const legacyRoot = join(tmpdir(), 'dsh-wf-legacy-' + Date.now())
@@ -179,31 +213,24 @@ section('旧数据迁移（~/Documents/界面草图 → domain）')
   await writeFile(join(legacyRoot, 'canvases', 'legacy-1', 'body.json'), JSON.stringify({ schemaVersion: 1, elements: [el] }))
   await writeFile(join(legacyRoot, 'canvases', 'legacy-1', 'meta.json'), JSON.stringify({ id: 'legacy-1', name: '旧画布', schemaVersion: 1, createdAt: now(), updatedAt: now(), elementCount: 1, hasMedia: false }))
 
-  const service = await createWfService({ storageDomain: createMemStorageDomain(), mediaRoot: '/media', unitPath: '/media/wf_canvas.json', mediaFs: createMemMediaFs() })
+  const service = await createWfService({ storagesRoot: ROOT, mediaRoot: MEDIA, fsImpl: createMemFs() })
   const r = await migrateLegacy(service, legacyRoot)
-  ok(r.migrated === 1, '迁移：1 张旧画布写入 domain')
+  ok(r.migrated === 1, '迁移：1 张旧画布写入目录文件')
   const meta = await service.getMeta('legacy-1')
   ok(meta.ok && meta.meta && meta.meta.name === '旧画布', '迁移：meta 一致')
   const body = await service.loadBody('legacy-1')
   ok(body.ok && body.body.elements.length === 1 && body.body.elements[0].text === '旧数据', '迁移：body 一致')
-  // 迁移成功 → 目录改名 .migrated
-  const { stat, rename: fsRename } = await import('node:fs/promises')
   const renamed = await stat(legacyRoot + '.migrated').then(() => true, () => false)
   ok(renamed, '迁移成功 → 旧目录改名 .migrated')
-  // 模拟改名失败/重启：目录恢复原名后再迁移 → 只入不覆盖（已有画布跳过，不再改名）
-  await fsRename(legacyRoot + '.migrated', legacyRoot)
-  const r2 = await migrateLegacy(service, legacyRoot)
-  ok(r2.migrated === 0 && r2.skipped === 1, '迁移：只入不覆盖（已有画布跳过）')
   await service.close()
-  const { rm } = await import('node:fs/promises')
-  await rm(legacyRoot, { recursive: true, force: true }).catch(() => {})
+  await rm(legacyRoot + '.migrated', { recursive: true, force: true }).catch(() => {})
 }
 
 // ---------- domain 适配器（remote 封装）+ 能力探测升级 ----------
 section('domain 适配器与探测升级')
 {
-  // 用内存 domain 构造真 service，再包成「remote 信封」（模拟 api-gateway 载体层）
-  const service = await createWfService({ storageDomain: createMemStorageDomain(), mediaRoot: '/media', unitPath: '/media/wf_canvas.json', mediaFs: createMemMediaFs() })
+  // 用内存 fs 构造真 service，再包成「remote 信封」（模拟 api-gateway 载体层）
+  const service = await createWfService({ storagesRoot: ROOT, mediaRoot: MEDIA, fsImpl: createMemFs() })
   const fakeRemote = {
     wfStorage: {
       ping: async (args) => ({ ok: true, value: await service.ping() }),

@@ -4,7 +4,7 @@
 >
 > 让模型精确理解你想要的界面，而不是用文字反复描述、反复猜。
 
-[![v2.0.0](https://img.shields.io/badge/version-2.0.0-2f6feb)](https://github.com/frankzhan-git/dsh-wf)
+[![v2.1.0](https://img.shields.io/badge/version-2.1.0-2f6feb)](https://github.com/frankzhan-git/dsh-wf)
 [![10 套验证全绿](https://img.shields.io/badge/verify-10%20suites%20%E2%9C%93-2ea043)]()
 
 dsh-wf 是 [DeepSeek Harness](https://github.com/deepseek-ai) 的正式插件：在会话输入框的工具行点「草图」按钮唤起轻量画板，绘制界面布局后一键生成 **JSONL 语义描述**，嵌入输入框随你的文字需求一起发给 agent——结构、层级、比例、要求全部精确传达，无需多轮澄清。
@@ -18,7 +18,7 @@ dsh-wf 是 [DeepSeek Harness](https://github.com/deepseek-ai) 的正式插件：
 - **JSONL 一等公民**：输出遵循《UI布局语义描述标准》——纯净七字段、空值省略、只表达结构语义，不输出坐标/尺寸/样式
 - **语义预览**：画布内实时预览解析出的 JSON 与控件树，解析不对立刻可见
 - **画布文档管理**：自动保存（增量写入）、最近打开、重命名、删除（二次确认）、导出 / 导入备份
-- **宿主存储**：官方存储域（`ctx.storageDomain`）原子写落盘 `~/.dsh/storages/wf_canvas.json`，经官方 @Remote 网关传输（zod 线协议校验）；浏览器存储自动降级
+- **宿主存储**：每画布一个 JSON 文件归类目录（`~/.dsh/storages/wf-canvases/{id}.json`，原子写），经官方 @Remote 网关传输（zod 线协议校验）；浏览器存储自动降级
 - **注册表驱动**：18 种控件类型、6 个 JSONL 结构字段全部注册表化，新增类型不改业务逻辑
 - **结构陈述而非高保真**：JSONL 只表达结构与内容（文字/占位/输入类型/选项/动作/选中态）；资源地址、尺寸、播放行为、默认值、进度等运行态与实现细节一律走 `description`，由模型结合上下文实现
 
@@ -113,8 +113,8 @@ dsh --profile web --dump-config | findstr dsh-wf
 | --- | --- |
 | 按钮不出现 | 第 4 步 junction 缺失或第 5 步 bundles 漏加 → 补齐后重启 |
 | 控制台报 `Cannot find module 'dsh界面草图'` | banner id 与 patch name 不一致 → 重新构建 |
-| 画布保存失败 toast | 官方存储域未生效（需 DSH ≥ 0.1.0-rc.7 且 web profile 含 storage-domain）→ 确认重启过 DSH；或自动降级 localStorage（不影响使用） |
-| 画布数据在 `~/.dsh/storages/wf_canvas.json` | 官方存储域正常（JSON 原子写，媒体在 `~/.dsh/storages/wf-media/`）；旧版 `~/Documents/界面草图/` 数据启动时自动迁移 |
+| 画布保存失败 toast | 宿主存储未生效（需 DSH ≥ 0.1.0-rc.7 且 web profile 含 api-remotes）→ 确认重启过 DSH；或自动降级 localStorage（不影响使用） |
+| 画布数据在 `~/.dsh/storages/wf-canvases/` | 宿主存储正常（每画布一个 JSON，媒体在 `~/.dsh/storages/wf-media/`）；旧版数据（官方域文件 / `~/Documents/界面草图/`）启动时自动迁移 |
 
 ---
 
@@ -173,7 +173,7 @@ dsh --profile web --dump-config | findstr dsh-wf
 
 - 右侧「画布文档」面板：自动保存的文档列表，点击载入
 - 重命名（双击名称或「改名」）、导出（`.dshwf.json` 备份）、导入（重建 id 绝不覆盖）、删除（二次确认）
-- 宿主存储启用时，数据落官方存储域 `~/.dsh/storages/wf_canvas.json`（JSON 原子写，媒体 `~/.dsh/storages/wf-media/`）；未启用时自动降级浏览器 localStorage
+- 宿主存储启用时，数据落 `~/.dsh/storages/wf-canvases/{id}.json`（每画布一个 JSON，原子写；媒体 `~/.dsh/storages/wf-media/`）；未启用时自动降级浏览器 localStorage
 
 ---
 
@@ -181,11 +181,10 @@ dsh --profile web --dump-config | findstr dsh-wf
 
 ```
 dsh-wf/
-├── lib/                    # 宿主半（Node 进程，官方存储域 + Typert Remote 网关）
-│   ├── index.js            #   Cordis 入口：ctx.storageDomain + ctx.typert.register + bindTypertRemote
-│   ├── domain.js           #   wf_canvas 领域声明（meta/body 两表 + global，zod schema）
+├── lib/                    # 宿主半（Node 进程，目录文件存储 + Typert Remote 网关）
+│   ├── index.js            #   Cordis 入口：ctx.typert.register + bindTypertRemote + 迁移
 │   ├── wire.js             #   线协议单一来源（invocations/descriptors 双端共用）
-│   ├── wf-service.js       #   CanvasStore 契约 → 领域操作（update RMW / 损坏隔离 / 媒体外置）
+│   ├── wf-service.js       #   CanvasStore 契约 → 目录文件存储（每画布一 JSON + 原子写 + 缓存）
 │   ├── typert.host.js      #   宿主线协议贡献（gateway 严格路径）
 │   └── migrate-legacy.js   #   旧版文件库（~/Documents/界面草图/）一次性迁移
 ├── src/
@@ -200,7 +199,7 @@ dsh-wf/
 │   ├── components/         # 表现层（画布 / 属性面板 / 文档管理 / 预览，全部纯展示）
 │   ├── i18n/               # 文案表（zh 默认，key 化预留多语言）
 │   └── css/                # 样式（--wf-* token）
-├── scripts/                # 构建 + 10 套验证 + 真后端冒烟
+├── scripts/                # 构建 + 10 套验证 + 真 fs 冒烟
 ├── schema.json             # JSONL 标准 Schema（与注册表一致性自动检查）
 └── ARCHITECTURE.md         # 完整架构蓝本（七范式 + 实施记录）
 ```
@@ -209,9 +208,9 @@ dsh-wf/
 
 | 阶段 | 存储 | 说明 |
 | --- | --- | --- |
-| 现役 | localStorage（浏览器） | 无官方存储域时自动降级，容量探测 + 导出引导 |
-| 正式发布 | 官方存储域（`ctx.storageDomain` JSON 后端） | `~/.dsh/storages/wf_canvas.json` 原子写；@Remote 网关传输（zod 线协议校验）；旧版文件库自动迁移 |
-| 预留 | SQLite（hostSQLite） | 数据量大 / 跨画布检索时启用（官方 roadmap：`sqlite` 后端与 `json` 并排挂载） |
+| 现役 | localStorage（浏览器） | 无宿主存储时自动降级，容量探测 + 导出引导 |
+| 正式发布 | 目录文件（每画布一个 JSON） | `~/.dsh/storages/wf-canvases/{id}.json` 原子写、归类目录；@Remote 网关传输（zod 线协议校验）；旧数据自动迁移 |
+| 预留 | SQLite（hostSQLite） | 数据量大 / 跨画布检索时启用（CanvasStore 接口不变） |
 
 存储后端通过 `probeAdapters` 能力探测自动选择，业务代码零改动。
 
@@ -229,7 +228,7 @@ npm run verify   # 10 套脚本一键全绿
 | verify-registry / serializer | 注册表完整性 / 类型 props / schema.json 一致性 / 字段面板对齐 |
 | verify-interactions | 交互状态机（决策/吸附/钳制/多帧增量跟随/结算/resize 吸附） |
 | verify-newcanvas | 新建画布端到端管线（严格顺序/无幽灵画布/页面不丢失） |
-| verify-storage / host-storage | 存储往返 / 增量 patch / 迁移 / 损坏隔离 / 官方存储域全流程（内存 domain）+ 真后端冒烟（scripts/smoke-domain.mjs） |
+| verify-storage / host-storage | 存储往返 / 增量 patch / 迁移 / 损坏隔离 / 目录文件全流程（内存 fs）+ 真 fs 冒烟（scripts/smoke-storage.mjs） |
 | verify-adapter-contract | 适配器接口契约（domain / localStorage / 预留桩） |
 | verify-perf | 性能基线（300 元素管线 < 50ms） |
 

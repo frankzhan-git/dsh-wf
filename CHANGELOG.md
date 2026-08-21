@@ -1,5 +1,19 @@
 # 更新日志
 
+## v2.1.0（2026）
+
+### 存储介质 v2.1：每画布一个 JSON 文件，归类目录
+
+- **画布正文介质从官方存储域单文件改为目录文件**：`~/.dsh/storages/wf-canvases/{canvasId}.json`（CanvasFile 完整形态，meta + elements 合一）；官方 json 后端固定单单位单文件平铺、无子目录、无单位枚举，无法满足「每画布一文件 + 目录归类」→ 正文介质由宿主半 node:fs 自管
+- **原子写**：writeAtomic（临时文件 + fsync + rename，官方 JSON 后端同款模式）；崩溃安全保留
+- **写放大消失**：单画布保存只重写自己那个文件（官方域单文件方案下任一画布保存触发整文件重写）
+- **meta 缓存**：启动扫描 `wf-canvases/` 建内存索引（文件权威，损坏可重建）；无 100 条索引上限
+- **容错**：损坏文件改名 `.corrupt` 隔离 + 缓存剔除；宿主侧写链串行（读-改-写）
+- **迁移**：旧官方域单位文件 `wf_canvas.json` 启动自动拆分到每画布文件（只入不覆盖，成功后改名 `.migrated`）；v4 旧文件库迁移不变
+- **传输与接口零改动**：官方 @Remote 网关（typert 严格路径 + remote.$mount）、wire 线协议、CanvasStore 接口、client 全部不变；`domainAdapter` 现役
+- **依赖清理**：移除 `@deepseek-ai/dsh-storage-domain`（生产）与 `dsh-storage-json`（dev，冒烟改用真 fs 临时目录）
+- 验证：verify-host-storage 35+ 断言（含域文件拆分迁移/只入不覆盖/损坏隔离）+ smoke-storage.mjs 真 fs 冒烟 + 10 套全绿
+
 ## v2.0.0（2026）
 
 ### 存储架构 v5 定稿：官方存储域 + @Remote 网关
