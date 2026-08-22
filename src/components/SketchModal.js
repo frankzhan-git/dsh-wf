@@ -3,7 +3,7 @@
 // 编辑动作在 useCanvasEdit，画布管理/自动保存在 useCanvasManager，全部计算在 core/interactions 纯函数
 // 渲染委托给纯展示子组件：CanvasStage / CanvasOverlay / RightPanel（控件设置 + 画布历史）
 import React from 'react'
-import { CANVAS_W, CANVAS_H, cloneElements } from '../core/model.js'
+import { CANVAS_W, CANVAS_H, cloneElements, reserveSeqs } from '../core/model.js'
 import { contains, inferType } from '../core/infer.js'
 import { buildResult } from '../core/pipeline.js'
 import { buildInsertText } from '../core/prompt.js'
@@ -34,7 +34,12 @@ export function SketchModal(props) {
   const draft = (p.useInput || (() => null))((s) => (s && typeof s.draft === 'string' ? s.draft : ''))
   const { toast, showToast } = useToasts(open)
   const initLastRef = React.useRef(null) // 惰性初始化一次，避免多次读 localStorage
-  if (initLastRef.current === null) initLastRef.current = initLast()
+  if (initLastRef.current === null) {
+    initLastRef.current = initLast()
+    // 载入即推进 id 序列：刷新浏览器后 seq 归零，而画布元素 id 仍从 e1 起 ——
+    // 不推进则复制粘贴的副本 id 与既有元素重复（副本无法独立操作、保存覆盖原件）
+    if (initLastRef.current) reserveSeqs(initLastRef.current.els)
+  }
   const init = initLastRef.current
   const sketch = useSketchState({
     elements: init ? init.els : freshPage(),

@@ -89,6 +89,8 @@ export function hitGroupEdge(gb, x, y, handle) {
 // 元素边带命中（从上层到下层遍历全部元素，与 hitTest 同序）：
 // 边带含元素外侧（边缘 ±8/zoom）——光标已在元素外提示可调整（ew/ns），
 // 点击边缘外侧也必须触发 resize，否则落入空白误触发框选/选中
+// 调用前提：仅当 (x,y) 未被任何元素内部覆盖（hitTest 未命中）时调用——
+// 被覆盖的位置由命中元素分支处理（自身边带/角 → 改尺寸），下层元素边带不截胡上层目标
 export function hitEdgeOfAny(elements, x, y, zoom) {
   const cw = 14 / zoom
   const cOut = 8 / zoom
@@ -120,9 +122,14 @@ export function decidePointerDown(ctx, x, y, clientX, clientY) {
       return { kind: 'groupEdgeResize', drag: { mode: 'groupEdgeResize', side: gSide, sx: x, sy: y, gb } }
     }
   }
-  // 元素边带优先（先于 hitTest）：光标已在元素边缘（含外侧 ±8/zoom）提示可调整，
-  // 点击边缘外侧也必须触发 resize——否则落入空白误触发框选/选中（Ctrl 保持切换语义）
-  if (mode === 'select' && !ctx.ctrl) {
+  // 元素内部命中（hitTest 最上层）优先于一切边带：
+  // 修复「下层控件边缘/右下角截胡上层目标控件」——拖动目标控件 A 时，若鼠标恰好落在
+  // 其下层控件 B 的边带/角上（该位置被 A 覆盖），此前会误触发对 B 的 resize/边拖，
+  // A 无法拖动。正确语义：位置被哪个元素覆盖，由该元素决定（自身边带/角 → 改尺寸，
+  // 否则 → 选中/移动）；仅空白处（未被任何元素覆盖）才允许边缘外侧 ±8/zoom 触发
+  // resize（v2.2.3 语义保留：边缘外侧点击不落入空白框选；Ctrl 保持切换语义）
+  const hit = hitTest(elements, x, y)
+  if (!hit && mode === 'select' && !ctx.ctrl) {
     const edgeHit = hitEdgeOfAny(elements, x, y, zoom)
     if (edgeHit) {
       const el = edgeHit.el
@@ -141,7 +148,6 @@ export function decidePointerDown(ctx, x, y, clientX, clientY) {
     }
   }
   // 命中已有控件：选中 + 移动 / 边或右下角改大小
-  const hit = hitTest(elements, x, y)
   // 控件模式下「容器类」命中（页面/容器/未显式类型矩形）视为空白：可在其内部继续绘制控件
   const hitContainerLike = !!(hit && mode === 'draw'
     && (hit.type === 'page' || hit.type === 'container' || !hit.type))
@@ -628,10 +634,14 @@ export function collectCopySet(elements, ids) {
 // 粘贴副本：深拷贝 + 重新分配 id + 整体偏移 (dx, dy)。
 // 集合内所有元素使用同一位移 → 子元素与容器/页面的相对位置与复制源完全一致；
 // 所有字段（类型/样式/设置/文本/备注）经 JSON 深拷贝逐项保留
-export function buildPaste(copySet, dx, dy) {
+// existing（可选）：画布现有元素 id（数组/可迭代）——分配 id 时逐次跳过冲突，
+// 保证副本 id 与画布内既有元素永不重复（防御：即使载入路径漏了 reserveSeqs 也不产生重复 id）
+export function buildPaste(copySet, dx, dy, existing) {
+  const taken = existing ? new Set(existing) : null
   return copySet.map((e) => {
     const c = cloneElements([e])[0]
     c.id = nextId()
+    if (taken) while (taken.has(c.id)) c.id = nextId()
     c.x += dx
     c.y += dy
     return c

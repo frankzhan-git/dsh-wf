@@ -13,6 +13,18 @@ export const ALL_TYPES = [
 let seq = 0
 export function nextId() { return 'e' + (++seq) }
 
+// 载入既有画布后推进 id 序列：保证 nextId 与已载入元素的 id 永不冲突。
+// 背景：浏览器刷新后模块 seq 归零，而画布元素 id 仍从 e1 起——若不复位推进，
+// 复制粘贴时 buildPaste 生成的副本 id 会与画布现有元素重复，导致副本无法独立
+// 选中/拖动/删除（操作按 id 命中原元素）、自动保存按 id 覆盖原元素（数据丢失）。
+// 调用点：所有元素载入路径（initLast / restoreLast / loadCanvas / 导入）。
+export function reserveSeqs(elements) {
+  for (const e of elements || []) {
+    const m = /^e(\d+)$/.exec(String((e && e.id) || ''))
+    if (m) seq = Math.max(seq, Number(m[1]))
+  }
+}
+
 // 创建草图元素。x/y/w/h 为画布逻辑坐标；arrow 额外记录终点 x2/y2
 // name：用户可设置的元素名称（显示在画布上，并作为 JSONL 的 name；留空则不输出，避免与 text 重复）
 // action/inputType/optionsText：按钮动作 / 输入类型 / 下拉选项文本（逗号分隔），直接映射到 props

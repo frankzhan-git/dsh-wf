@@ -173,7 +173,9 @@ export function useCanvasInteractions(deps) {
         }
         // 粘贴：新 id + 整体小幅位移（横纵都有偏移，避免与原控件重叠）；
         // 组内同位移 → 子元素与容器/页面的相对位置与复制源完全一致
-        const copies = buildPaste(copyBuf, PASTE_OFFSET, PASTE_OFFSET)
+        // existing 传入当前元素 id：即使序号与既有 id 撞车（刷新后加载旧画布的场景），
+        // 副本 id 也保持全局唯一——杜绝「副本无法选中/拖动/删除、保存覆盖原件」的假死体验
+        const copies = buildPaste(copyBuf, PASTE_OFFSET, PASTE_OFFSET, elements.map((e) => e.id))
         commitHistory(cloneElements(elements))
         setElements((els) => els.concat(copies))
         applySelection(copies.map((c) => c.id))

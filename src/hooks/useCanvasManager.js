@@ -9,7 +9,7 @@
 //  - 画布 id 只在「新建」时显式生成并立即绑定；auto-save 遇 currentId=null 直接跳过
 //    ——不存在「无 id 自动创建」，从机制上杜绝幽灵画布
 import React from 'react'
-import { cloneElements, createElement } from '../core/model.js'
+import { cloneElements, createElement, reserveSeqs } from '../core/model.js'
 import { defaultStore, exportCanvasFile, importCanvasFile } from '../core/storage/index.js'
 import { genCanvasId } from '../core/storage/schema.js'
 import { t } from '../i18n/index.js'
@@ -26,17 +26,22 @@ export function freshPage() {
 
 // 打开时显示上一次画布（最近保存的文档），不自动新建；新建由用户手动执行
 // 走适配器同步变体（localStorage 能力）：打开画布同步初始化，避免闪屏
+// P5 容错：读取永不抛——数据意外损坏（如循环引用）时兜底空白画布，绝不让浮层渲染崩溃
 export function initLast() {
-  const store = defaultStore()
-  if (!store.sync) return null
-  const docs = store.sync.listMeta()
-  if (docs.length) {
-    const body = store.sync.loadBody(docs[0].id)
-    if (body && body.elements.length) {
-      return { els: cloneElements(body.elements), root: docs[0].name, id: docs[0].id }
+  try {
+    const store = defaultStore()
+    if (!store.sync) return null
+    const docs = store.sync.listMeta()
+    if (docs.length) {
+      const body = store.sync.loadBody(docs[0].id)
+      if (body && body.elements.length) {
+        return { els: cloneElements(body.elements), root: docs[0].name, id: docs[0].id }
+      }
     }
+    return null
+  } catch (e) {
+    return null
   }
-  return null
 }
 
 export function useCanvasManager(deps) {
@@ -88,6 +93,7 @@ export function useCanvasManager(deps) {
       if (!body || !body.elements || !body.elements.length) return
       if (currentIdRef.current !== null || lastSavedRef.current !== null) return
       const els = cloneElements(body.elements)
+      reserveSeqs(els) // 载入即推进 id 序列：后续新建/粘贴的 id 不与载入元素冲突
       setElements(els)
       lastSavedRef.current = cloneElements(els)
       setRootName(latest.name || '画布')
@@ -209,8 +215,10 @@ export function useCanvasManager(deps) {
     await flushSave() // 保存当前画布（入队等待；无变化/未创建则立即返回）
     const body = await storeRef.current.loadBody(h.id)
     const els = body ? body.elements : []
-    setElements(cloneElements(els))
-    lastSavedRef.current = cloneElements(els)
+    const loaded = cloneElements(els)
+    reserveSeqs(loaded) // 载入即推进 id 序列：后续新建/粘贴的 id 不与载入元素冲突
+    setElements(loaded)
+    lastSavedRef.current = cloneElements(loaded)
     setRootName(typeof h.name === 'string' ? h.name : '画布')
     setCurrent(h.id)
     applySelection([])

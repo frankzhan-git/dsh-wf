@@ -395,6 +395,40 @@ section('四边 resize：pointer.down 边手柄命中')
   // 超出边带（边缘 8px 外）→ 仍为空白行为
   const dO4 = decidePointerDown({ elements: elsO, mode: 'select', zoom: 1, selectedIds: [], spaceDown: false, pan: { x: 0, y: 0 } }, 85, 130, 85, 130)
   ok(dO4.kind === 'marquee', '边缘外侧超过边带（15px）→ 空白框选')
+
+  // ---------- 回归（v2.2.8）：下层控件边带/右下角不截胡上层目标控件 ----------
+  // 场景：目标控件 A（上层，数组后）下方有控件 B（下层，数组前），A 覆盖 B 的部分边带；
+  // 拖 A 时鼠标恰落在 B 的边带/角上（该位置同时被 A 覆盖）→ 必须仍是拖 A
+  // ① B 上边缘带被 A 覆盖（B.y=260 的上边缘带 [252,268] 在 A 内）：
+  //    A(100,200,200,100) 上层；B(100,260,200,100) 下层；点 (250,265) 在 A 内部非边带
+  {
+    const elsZ = [mk(100, 260, 200, 100), mk(100, 200, 200, 100)]
+    const aZ = elsZ[1]
+    const dZ = decidePointerDown({ elements: elsZ, mode: 'select', zoom: 1, selectedIds: [], spaceDown: false, pan: { x: 0, y: 0 } }, 250, 265, 250, 265)
+    ok(dZ.kind === 'move' && dZ.drag.id === aZ.id, '下层 B 上边缘带被 A 覆盖：点 B 边带 → 拖 A（不是 resize B）')
+  }
+  // ② B 右下角被 A 覆盖：B(100,200,200,90) 右下角区 [286,308]×[276,298]；A(100,240,260,100) 覆盖之；
+  //    点 (295,285) 在 A 内部非 A 自身手柄 → 拖 A（不是 resize B br）
+  {
+    const elsZ = [mk(100, 200, 200, 90), mk(100, 240, 260, 100)]
+    const aZ = elsZ[1]
+    const dZ = decidePointerDown({ elements: elsZ, mode: 'select', zoom: 1, selectedIds: [], spaceDown: false, pan: { x: 0, y: 0 } }, 295, 285, 295, 285)
+    ok(dZ.kind === 'move' && dZ.drag.id === aZ.id, '下层 B 右下角被 A 覆盖：点 B 右下角 → 拖 A（不是 resize B br）')
+  }
+  // ③ 未被覆盖的空白处点击 B 自身边缘外侧 → 仍 resize B（v2.2.3 语义不受影响）
+  {
+    const elsQ = [mk(100, 240, 200, 100), mk(100, 200, 200, 60)]
+    const bQ = elsQ[0]
+    const dQ = decidePointerDown({ elements: elsQ, mode: 'select', zoom: 1, selectedIds: [], spaceDown: false, pan: { x: 0, y: 0 } }, 95, 300, 95, 300)
+    ok(dQ.kind === 'resize' && dQ.drag.id === bQ.id && dQ.drag.side === 'l', 'B 自身边缘外侧（未被覆盖）→ 仍 resize B')
+  }
+  // ④ 点被多个下层元素的边带覆盖、且顶层元素内部覆盖该点 → 顶层元素优先（拖 A）
+  {
+    const elsY = [mk(100, 260, 200, 100), mk(100, 200, 200, 100), mk(100, 100, 400, 200)]
+    const aY = elsY[2]
+    const dY = decidePointerDown({ elements: elsY, mode: 'select', zoom: 1, selectedIds: [], spaceDown: false, pan: { x: 0, y: 0 } }, 250, 265, 250, 265)
+    ok(dY.kind === 'move' && dY.drag.id === aY.id, '顶层 A 覆盖点（下层多层边带重合）→ 拖 A')
+  }
 }
 
 // ---------- 多选外框四边 resize（幅度与移动量一致，线性非等比） ----------
